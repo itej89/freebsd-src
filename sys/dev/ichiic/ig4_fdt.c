@@ -193,12 +193,30 @@ ig4iic_fdt_attach(device_t dev)
 	/*
 	 * Step 5: Call the core ig4 driver.
 	 * This does all the real I2C work: configure timing registers,
-	 * set up FIFO, create the iicbus child device (/dev/iic0),
+	 * set up FIFO, create the iicbus child device,
 	 * install the interrupt handler.
 	 */
 	error = ig4iic_attach(sc);
 	if (error != 0)
 		goto fail;
+
+	/*
+	 * Step 6: Replace the plain iicbus with ofw_iicbus.
+	 * ig4iic_attach() creates a plain "iicbus" child, but on FDT
+	 * systems we need "ofw_iicbus" so it scans the device tree
+	 * for child devices (like pmic@36).
+	 */
+	if (sc->iicbus != NULL) {
+		device_delete_child(dev, sc->iicbus);
+		sc->iicbus = NULL;
+	}
+	sc->iicbus = device_add_child(dev, "ofw_iicbus", DEVICE_UNIT_ANY);
+	if (sc->iicbus == NULL) {
+		device_printf(dev, "could not add ofw_iicbus\n");
+		error = ENXIO;
+		goto fail;
+	}
+	bus_attach_children(dev);
 
 	return (0);
 
