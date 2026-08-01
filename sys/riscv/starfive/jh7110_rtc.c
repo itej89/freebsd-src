@@ -13,6 +13,7 @@
 #include <sys/bus.h>
 #include <sys/clock.h>
 #include <sys/kernel.h>
+#include <sys/libkern.h>
 #include <sys/lock.h>
 #include <sys/module.h>
 #include <sys/mutex.h>
@@ -82,18 +83,6 @@
 #define	RD4(sc, off)	bus_read_4((sc)->res, (off))
 #define	WR4(sc, off, v)	bus_write_4((sc)->res, (off), (v))
 
-static uint8_t
-bcd2bin(uint8_t val)
-{
-	return ((val >> 4) * 10 + (val & 0x0f));
-}
-
-static uint8_t
-bin2bcd(uint8_t val)
-{
-	return (((val / 10) << 4) | (val % 10));
-}
-
 struct jh7110_rtc_softc {
 	struct resource	*res;
 	int		rid;
@@ -125,7 +114,6 @@ jh7110_rtc_attach(device_t dev)
 {
 	struct jh7110_rtc_softc *sc;
 	uint32_t val;
-	int error;
 
 	sc = device_get_softc(dev);
 
