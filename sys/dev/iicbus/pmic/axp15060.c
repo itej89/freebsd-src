@@ -241,18 +241,18 @@ static int
 axp15060_write(device_t dev, uint8_t reg, uint8_t val)
 {
 	struct axp15060_softc *sc = device_get_softc(dev);
-	struct iic_msg msgs[2];
+	struct iic_msg msg;
+	uint8_t buf[2];
 
-	msgs[0].slave = sc->addr;
-	msgs[0].flags = IIC_M_WR;
-	msgs[0].len = 1;
-	msgs[0].buf = &reg;
-	msgs[1].slave = sc->addr;
-	msgs[1].flags = IIC_M_WR;
-	msgs[1].len = 1;
-	msgs[1].buf = &val;
+	buf[0] = reg;
+	buf[1] = val;
 
-	return (iicbus_transfer(dev, msgs, 2));
+	msg.slave = sc->addr;
+	msg.flags = IIC_M_WR;
+	msg.len = 2;
+	msg.buf = buf;
+
+	return (iicbus_transfer(dev, &msg, 1));
 }
 
 /* ================================================================
