@@ -42,6 +42,7 @@
  */
 
 #include "opt_acpi.h"
+#include "opt_platform.h"
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -64,6 +65,11 @@
 #include <contrib/dev/acpica/include/acpi.h>
 #include <contrib/dev/acpica/include/accommon.h>
 #include <dev/acpica/acpivar.h>
+#endif
+
+#ifdef FDT
+#include <dev/ofw/ofw_bus.h>
+#include <dev/ofw/ofw_bus_subr.h>
 #endif
 
 #include <dev/iicbus/iicbus.h>
@@ -1045,9 +1051,14 @@ ig4iic_attach(ig4iic_softc_t *sc)
 		goto done;
 	ig4iic_get_fifo(sc);
 
-	sc->iicbus = device_add_child(sc->dev,
-	    ofw_bus_get_node(sc->dev) > 0 ? "ofw_iicbus" : "iicbus",
-	    DEVICE_UNIT_ANY);
+#ifdef FDT
+	if (ofw_bus_get_node(sc->dev) > 0)
+		sc->iicbus = device_add_child(sc->dev, "ofw_iicbus",
+		    DEVICE_UNIT_ANY);
+	else
+#endif
+		sc->iicbus = device_add_child(sc->dev, "iicbus",
+		    DEVICE_UNIT_ANY);
 	if (sc->iicbus == NULL) {
 		device_printf(sc->dev, "iicbus driver not found\n");
 		error = ENXIO;
