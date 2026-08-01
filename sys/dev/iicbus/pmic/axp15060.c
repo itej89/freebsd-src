@@ -403,6 +403,8 @@ axp15060_attach(device_t dev)
 	    M_AXP15060_REG, M_WAITOK | M_ZERO);
 
 	rnode = ofw_bus_find_child(ofw_bus_get_node(dev), "regulators");
+	device_printf(dev, "OFW node: 0x%x, regulators node: 0x%x\n",
+	    (unsigned)ofw_bus_get_node(dev), (unsigned)rnode);
 	if (rnode > 0) {
 		for (i = 0; i < sc->nregs; i++) {
 			child = ofw_bus_find_child(rnode,
