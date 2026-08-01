@@ -26,7 +26,10 @@
 #include <dev/ofw/ofw_bus.h>
 #include <dev/ofw/ofw_bus_subr.h>
 
+#include <dev/fdt/fdt_pinctrl.h>
+
 #include "gpio_if.h"
+#include "fdt_pinctrl_if.h"
 
 #define GPIO_PINS		64
 #define GPIO_REGS		2
@@ -255,6 +258,122 @@ jh7110_gpio_pin_setflags(device_t dev, uint32_t pin, uint32_t flags)
 	return (0);
 }
 
+/* Pin mux register layout:
+ * DOEN: base + 0x000, 4 pins per 32-bit reg, 8 bits each, mask 0x3f
+ * DOUT: base + 0x040, 4 pins per 32-bit reg, 8 bits each, mask 0x7f
+ * GPI:  base + 0x080, 4 inputs per 32-bit reg, 8 bits each, mask 0x7f
+ * PAD:  base + 0x120, 1 pad per 32-bit reg
+ */
+#define	SYS_GPI_BASE		0x080
+#define	SYS_GPI_MASK		0x7f
+#define	DOUT_MASK		0x7f
+#define	DOEN_MASK		0x3f
+
+#define	GPI_NONE_VAL		255
+
+/* Pad config bits at base + 0x120 + pin*4 */
+#define	PADCFG_IE		(1 << 0)
+#define	PADCFG_DS_MASK		(3 << 1)
+#define	PADCFG_PU		(1 << 3)
+#define	PADCFG_PD		(1 << 4)
+#define	PADCFG_SMT		(1 << 6)
+
+/*
+ * Parse GPIOMUX packed value:
+ *  | 31-24 | 23-16 | 15-10 | 9-8  | 7-0  |
+ *  |  din  | dout  | doen  | func | gpio |
+ */
+#define	PINMUX_GPIO(v)		((v) & 0x3f)
+#define	PINMUX_DOUT(v)		(((v) >> 16) & 0xff)
+#define	PINMUX_DOEN(v)		(((v) >> 10) & 0x3f)
+#define	PINMUX_DIN(v)		(((v) >> 24) & 0xff)
+
+static void
+jh7110_set_pin_mux(struct jh7110_gpio_softc *sc, uint32_t pin,
+    uint32_t dout, uint32_t doen, uint32_t din)
+{
+	uint32_t offset, shift, val;
+
+	offset = 4 * (pin / 4);
+	shift = 8 * (pin % 4);
+
+	/* Set DOUT */
+	val = JH7110_GPIO_READ(sc, GP0_DOUT_CFG + offset);
+	val &= ~(DOUT_MASK << shift);
+	val |= (dout & DOUT_MASK) << shift;
+	JH7110_GPIO_WRITE(sc, GP0_DOUT_CFG + offset, val);
+
+	/* Set DOEN */
+	val = JH7110_GPIO_READ(sc, GP0_DOEN_CFG + offset);
+	val &= ~(DOEN_MASK << shift);
+	val |= (doen & DOEN_MASK) << shift;
+	JH7110_GPIO_WRITE(sc, GP0_DOEN_CFG + offset, val);
+
+	/* Set GPI (input routing) */
+	if (din != GPI_NONE_VAL) {
+		uint32_t ioffset = 4 * (din / 4);
+		uint32_t ishift = 8 * (din % 4);
+
+		val = JH7110_GPIO_READ(sc, SYS_GPI_BASE + ioffset);
+		val &= ~(SYS_GPI_MASK << ishift);
+		val |= ((pin + 2) & SYS_GPI_MASK) << ishift;
+		JH7110_GPIO_WRITE(sc, SYS_GPI_BASE + ioffset, val);
+	}
+}
+
+static int
+jh7110_pinctrl_configure(device_t dev, phandle_t cfgxref)
+{
+	struct jh7110_gpio_softc *sc = device_get_softc(dev);
+	phandle_t node, child;
+	uint32_t *pinmux;
+	uint32_t padcfg;
+	int npins, i;
+
+	node = OF_node_from_xref(cfgxref);
+
+	/* Iterate children of the pin config node (e.g., "i2c-pins") */
+	for (child = OF_child(node); child != 0; child = OF_peer(child)) {
+		npins = OF_getencprop_alloc_multi(child, "pinmux",
+		    sizeof(uint32_t), (void **)&pinmux);
+		if (npins <= 0)
+			continue;
+
+		/* Build pad config from DT properties */
+		padcfg = 0;
+		if (OF_hasprop(child, "input-enable"))
+			padcfg |= PADCFG_IE;
+		if (OF_hasprop(child, "input-schmitt-enable"))
+			padcfg |= PADCFG_SMT;
+		if (OF_hasprop(child, "bias-pull-up"))
+			padcfg |= PADCFG_PU;
+		else if (OF_hasprop(child, "bias-pull-down"))
+			padcfg |= PADCFG_PD;
+
+		JH7110_GPIO_LOCK(sc);
+
+		for (i = 0; i < npins; i++) {
+			uint32_t pin = PINMUX_GPIO(pinmux[i]);
+			uint32_t dout = PINMUX_DOUT(pinmux[i]);
+			uint32_t doen = PINMUX_DOEN(pinmux[i]);
+			uint32_t din = PINMUX_DIN(pinmux[i]);
+
+			jh7110_set_pin_mux(sc, pin, dout, doen, din);
+
+			/* Set pad config */
+			if (pin < 64)
+				JH7110_GPIO_WRITE(sc,
+				    IOMUX_SYSCFG_288 + PAD_OFFSET(pin),
+				    padcfg);
+		}
+
+		JH7110_GPIO_UNLOCK(sc);
+		OF_prop_free(pinmux);
+	}
+
+	return (0);
+}
+
 static int
 jh7110_gpio_probe(device_t dev)
 {
@@ -328,6 +447,9 @@ jh7110_gpio_attach(device_t dev)
 		return (ENXIO);
 	}
 
+	fdt_pinctrl_register(dev, NULL);
+	fdt_pinctrl_configure_tree(dev);
+
 	bus_attach_children(dev);
 	return (0);
 }
@@ -357,6 +479,9 @@ static device_method_t jh7110_gpio_methods[] = {
 
 	/* ofw_bus interface */
 	DEVMETHOD(ofw_bus_get_node,	jh7110_gpio_get_node),
+
+	/* fdt_pinctrl interface */
+	DEVMETHOD(fdt_pinctrl_configure, jh7110_pinctrl_configure),
 
 	DEVMETHOD_END
 };
