@@ -89,6 +89,9 @@
  * Ig4 hardware parameters except Haswell are taken from intel_lpss driver
  */
 static const struct ig4_hw ig4iic_hw[] = {
+	[IG4_DESIGNWARE] = {
+		.ic_clock_rate = 100,	/* MHz, overridden at runtime from DT clock */
+	},
 	[IG4_EMAG] = {
 		.ic_clock_rate = 100,	/* MHz */
 	},
