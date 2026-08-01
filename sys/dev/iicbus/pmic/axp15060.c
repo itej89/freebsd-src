@@ -403,33 +403,54 @@ axp15060_attach(device_t dev)
 	    M_AXP15060_REG, M_WAITOK | M_ZERO);
 
 	rnode = ofw_bus_find_child(ofw_bus_get_node(dev), "regulators");
-	device_printf(dev, "OFW node: 0x%x, regulators node: 0x%x\n",
-	    (unsigned)ofw_bus_get_node(dev), (unsigned)rnode);
-	if (rnode > 0) {
-		for (i = 0; i < sc->nregs; i++) {
+	for (i = 0; i < sc->nregs; i++) {
+		child = 0;
+		if (rnode > 0)
 			child = ofw_bus_find_child(rnode,
 			    axp15060_regdefs[i].name);
-			if (child == 0) {
-				device_printf(dev,
-				    "regulator %s not in DT, skipping\n",
-				    axp15060_regdefs[i].name);
-				continue;
-			}
-			device_printf(dev,
-			    "found DT node for %s (0x%x)\n",
-			    axp15060_regdefs[i].name, (unsigned)child);
+
+		if (child != 0) {
 			reg = axp15060_reg_attach(dev, child,
 			    &axp15060_regdefs[i]);
-			if (reg == NULL) {
+		} else {
+			/* Register even without DT node for full chip control */
+			struct regnode_init_def initdef;
+			struct regnode *regnode;
+			struct axp15060_reg_sc *reg_sc;
+
+			memset(&initdef, 0, sizeof(initdef));
+			initdef.name = axp15060_regdefs[i].name;
+			initdef.id = axp15060_regdefs[i].id;
+			if (axp15060_regdefs[i].voltage_min > 0) {
+				initdef.std_param.min_uvolt =
+				    axp15060_regdefs[i].voltage_min * 1000;
+				initdef.std_param.max_uvolt =
+				    axp15060_regdefs[i].voltage_max * 1000;
+			}
+			regnode = regnode_create(dev,
+			    &axp15060_regnode_class, &initdef);
+			if (regnode == NULL) {
 				device_printf(dev,
-				    "cannot attach regulator %s\n",
+				    "cannot create regulator %s\n",
 				    axp15060_regdefs[i].name);
 				continue;
 			}
-			sc->regs[i] = reg;
-			device_printf(dev, "regulator %s registered\n",
-			    axp15060_regdefs[i].name);
+			reg_sc = regnode_get_softc(regnode);
+			reg_sc->regnode = regnode;
+			reg_sc->base_dev = dev;
+			reg_sc->def = &axp15060_regdefs[i];
+			reg_sc->xref = 0;
+			reg_sc->param = regnode_get_stdparam(regnode);
+			regnode_register(regnode);
+			reg = reg_sc;
 		}
+
+		if (reg == NULL) {
+			device_printf(dev, "cannot attach regulator %s\n",
+			    axp15060_regdefs[i].name);
+			continue;
+		}
+		sc->regs[i] = reg;
 	}
 
 	EVENTHANDLER_REGISTER(shutdown_final, axp15060_shutdown, dev,

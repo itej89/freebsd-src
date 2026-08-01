@@ -238,12 +238,130 @@
 				regulator-name = "vdd-cpu";
 			};
 
+			dcdc3 {
+				regulator-always-on;
+				regulator-min-microvolt = <500000>;
+				regulator-max-microvolt = <1540000>;
+				regulator-name = "dcdc3";
+			};
+
+			dcdc4 {
+				regulator-always-on;
+				regulator-min-microvolt = <500000>;
+				regulator-max-microvolt = <1540000>;
+				regulator-name = "dcdc4";
+			};
+
+			dcdc5 {
+				regulator-always-on;
+				regulator-min-microvolt = <800000>;
+				regulator-max-microvolt = <1840000>;
+				regulator-name = "dcdc5";
+			};
+
+			dcdc6 {
+				regulator-min-microvolt = <500000>;
+				regulator-max-microvolt = <3400000>;
+				regulator-name = "dcdc6";
+			};
+
+			mipi_0p9: aldo1 {
+				regulator-boot-on;
+				regulator-min-microvolt = <900000>;
+				regulator-max-microvolt = <900000>;
+				regulator-name = "mipi_0p9";
+			};
+
+			aldo2 {
+				regulator-min-microvolt = <700000>;
+				regulator-max-microvolt = <3300000>;
+				regulator-name = "aldo2";
+			};
+
+			hdmi_1p8: aldo3 {
+				regulator-boot-on;
+				regulator-min-microvolt = <1800000>;
+				regulator-max-microvolt = <1800000>;
+				regulator-name = "hdmi_1p8";
+			};
+
 			emmc_vdd: aldo4 {
 				regulator-boot-on;
 				regulator-always-on;
 				regulator-min-microvolt = <1800000>;
 				regulator-max-microvolt = <3300000>;
 				regulator-name = "emmc_vdd";
+			};
+
+			hdmi_0p9: aldo5 {
+				regulator-boot-on;
+				regulator-min-microvolt = <900000>;
+				regulator-max-microvolt = <900000>;
+				regulator-name = "hdmi_0p9";
+			};
+
+			bldo1 {
+				regulator-min-microvolt = <700000>;
+				regulator-max-microvolt = <3300000>;
+				regulator-name = "bldo1";
+			};
+
+			bldo2 {
+				regulator-min-microvolt = <700000>;
+				regulator-max-microvolt = <3300000>;
+				regulator-name = "bldo2";
+			};
+
+			bldo3 {
+				regulator-min-microvolt = <700000>;
+				regulator-max-microvolt = <3300000>;
+				regulator-name = "bldo3";
+			};
+
+			bldo4 {
+				regulator-min-microvolt = <700000>;
+				regulator-max-microvolt = <3300000>;
+				regulator-name = "bldo4";
+			};
+
+			bldo5 {
+				regulator-min-microvolt = <700000>;
+				regulator-max-microvolt = <3300000>;
+				regulator-name = "bldo5";
+			};
+
+			cldo1 {
+				regulator-min-microvolt = <700000>;
+				regulator-max-microvolt = <3300000>;
+				regulator-name = "cldo1";
+			};
+
+			cldo2 {
+				regulator-min-microvolt = <700000>;
+				regulator-max-microvolt = <3300000>;
+				regulator-name = "cldo2";
+			};
+
+			cldo3 {
+				regulator-min-microvolt = <700000>;
+				regulator-max-microvolt = <3300000>;
+				regulator-name = "cldo3";
+			};
+
+			cldo4 {
+				regulator-min-microvolt = <700000>;
+				regulator-max-microvolt = <4200000>;
+				regulator-name = "cldo4";
+			};
+
+			cpusldo {
+				regulator-min-microvolt = <700000>;
+				regulator-max-microvolt = <1400000>;
+				regulator-name = "cpusldo";
+			};
+
+			sw {
+				regulator-name = "sw";
 			};
 		};
 	};
