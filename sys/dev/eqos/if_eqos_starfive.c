@@ -17,6 +17,7 @@
 #include <sys/socket.h>
 #include <machine/bus.h>
 
+#include <net/ethernet.h>
 #include <net/if.h>
 #include <net/if_media.h>
 #include <dev/mii/mii.h>
@@ -27,6 +28,9 @@
 
 #include <dev/hwreset/hwreset.h>
 #include <dev/regulator/regulator.h>
+
+#include <dev/iicbus/iic.h>
+#include <dev/iicbus/iiconf.h>
 
 #include <dev/eqos/if_eqos_var.h>
 
@@ -40,6 +44,19 @@
 #define JH7110_CSR_FREQ		198000000
 
 #define	WR4(sc, o, v) bus_write_4(sc->base.res[EQOS_RES_MEM], (o), (v))
+#define	RD4(sc, o)    bus_read_4(sc->base.res[EQOS_RES_MEM], (o))
+
+/*
+ * StarFive EEPROM format v2 offsets.
+ * The EEPROM at I2C address 0x50 on I2C5 stores board info including
+ * two Ethernet MAC addresses. Layout determined from U-Boot source:
+ * starfive-tech/u-boot board/starfive/visionfive2/visionfive2-i2c-eeprom.c
+ */
+#define	VF2_EEPROM_I2C_ADDR	0x50
+#define	VF2_EEPROM_MAC0_OFF	0x78
+#define	VF2_EEPROM_MAC1_OFF	0x7E
+#define	VF2_EEPROM_MAGIC_OFF	0x00
+#define	VF2_EEPROM_MAGIC	"SFVF"
 
 static const struct ofw_compat_data compat_data[] = {
 	{"starfive,jh7110-dwmac",	1},
@@ -53,6 +70,70 @@ struct if_eqos_starfive_softc {
 	clk_t				stmmaceth;
 	clk_t				pclk;
 };
+
+/*
+ * Read a MAC address from the StarFive board EEPROM via I2C.
+ * mac_index: 0 for MAC0, 1 for MAC1.
+ * Returns 0 on success, non-zero on failure.
+ */
+static int
+if_eqos_starfive_read_eeprom_mac(device_t dev, int mac_index,
+    uint8_t *eaddr)
+{
+	device_t iicbus;
+	struct iic_msg msgs[2];
+	uint8_t offset;
+	uint8_t magic[4];
+	int error;
+
+	/* Find the first available I2C bus */
+	iicbus = devclass_get_device(devclass_find("iicbus"), 0);
+	if (iicbus == NULL) {
+		device_printf(dev, "no I2C bus available\n");
+		return (ENXIO);
+	}
+
+	/* Read and verify the EEPROM magic header */
+	offset = VF2_EEPROM_MAGIC_OFF;
+	msgs[0].slave = VF2_EEPROM_I2C_ADDR << 1;
+	msgs[0].flags = IIC_M_WR;
+	msgs[0].len = 1;
+	msgs[0].buf = &offset;
+	msgs[1].slave = VF2_EEPROM_I2C_ADDR << 1;
+	msgs[1].flags = IIC_M_RD;
+	msgs[1].len = sizeof(magic);
+	msgs[1].buf = magic;
+
+	error = iicbus_transfer(iicbus, msgs, 2);
+	if (error != 0) {
+		device_printf(dev, "EEPROM read failed: %d\n", error);
+		return (error);
+	}
+
+	if (memcmp(magic, VF2_EEPROM_MAGIC, 4) != 0) {
+		device_printf(dev, "EEPROM magic mismatch\n");
+		return (EINVAL);
+	}
+
+	/* Read MAC address at the appropriate offset */
+	offset = (mac_index == 0) ? VF2_EEPROM_MAC0_OFF : VF2_EEPROM_MAC1_OFF;
+	msgs[0].slave = VF2_EEPROM_I2C_ADDR << 1;
+	msgs[0].flags = IIC_M_WR;
+	msgs[0].len = 1;
+	msgs[0].buf = &offset;
+	msgs[1].slave = VF2_EEPROM_I2C_ADDR << 1;
+	msgs[1].flags = IIC_M_RD;
+	msgs[1].len = ETHER_ADDR_LEN;
+	msgs[1].buf = eaddr;
+
+	error = iicbus_transfer(iicbus, msgs, 2);
+	if (error != 0) {
+		device_printf(dev, "EEPROM MAC read failed: %d\n", error);
+		return (error);
+	}
+
+	return (0);
+}
 
 static int
 if_eqos_starfive_set_speed(device_t dev, int speed)
@@ -131,6 +212,8 @@ if_eqos_starfive_init(device_t dev)
 	struct if_eqos_starfive_softc *sc = device_get_softc(dev);
 	hwreset_t rst_ahb, rst_stmmaceth;
 	phandle_t node;
+	uint8_t eaddr[ETHER_ADDR_LEN];
+	uint32_t maclo, machi;
 
 	node = ofw_bus_get_node(dev);
 
@@ -185,6 +268,47 @@ if_eqos_starfive_init(device_t dev)
 		device_printf(dev, "Cannot deassert rst_stmmaceth\n");
 		return (ENXIO);
 	}
+
+	/*
+	 * Try to read MAC address from the device tree first
+	 * (set by U-Boot or manually in the DTS).
+	 * If not found, read from the StarFive board EEPROM via I2C.
+	 *
+	 * We determine which MAC to read (0 or 1) by checking
+	 * our register base address:
+	 *   0x16030000 = gmac0 → MAC0
+	 *   0x16040000 = gmac1 → MAC1
+	 */
+	if (OF_getprop(node, "local-mac-address", eaddr, ETHER_ADDR_LEN) ==
+	    ETHER_ADDR_LEN) {
+		device_printf(dev, "MAC from device tree: "
+		    "%02x:%02x:%02x:%02x:%02x:%02x\n",
+		    eaddr[0], eaddr[1], eaddr[2],
+		    eaddr[3], eaddr[4], eaddr[5]);
+	} else {
+		rman_res_t base;
+		int mac_index;
+
+		base = rman_get_start(sc->base.res[EQOS_RES_MEM]);
+		mac_index = (base == 0x16040000) ? 1 : 0;
+
+		if (if_eqos_starfive_read_eeprom_mac(dev, mac_index,
+		    eaddr) == 0) {
+			device_printf(dev, "MAC from EEPROM: "
+			    "%02x:%02x:%02x:%02x:%02x:%02x\n",
+			    eaddr[0], eaddr[1], eaddr[2],
+			    eaddr[3], eaddr[4], eaddr[5]);
+		} else {
+			return (0);
+		}
+	}
+
+	/* Write the MAC address into the hardware registers */
+	machi = eaddr[4] | (eaddr[5] << 8);
+	maclo = eaddr[0] | (eaddr[1] << 8) | (eaddr[2] << 16) |
+	    (eaddr[3] << 24);
+	WR4(sc, GMAC_MAC_ADDRESS0_HIGH, machi);
+	WR4(sc, GMAC_MAC_ADDRESS0_LOW, maclo);
 
 	return (0);
 }
