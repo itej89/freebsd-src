@@ -409,8 +409,15 @@ axp15060_attach(device_t dev)
 		for (i = 0; i < sc->nregs; i++) {
 			child = ofw_bus_find_child(rnode,
 			    axp15060_regdefs[i].name);
-			if (child == 0)
+			if (child == 0) {
+				device_printf(dev,
+				    "regulator %s not in DT, skipping\n",
+				    axp15060_regdefs[i].name);
 				continue;
+			}
+			device_printf(dev,
+			    "found DT node for %s (0x%x)\n",
+			    axp15060_regdefs[i].name, (unsigned)child);
 			reg = axp15060_reg_attach(dev, child,
 			    &axp15060_regdefs[i]);
 			if (reg == NULL) {
@@ -420,9 +427,8 @@ axp15060_attach(device_t dev)
 				continue;
 			}
 			sc->regs[i] = reg;
-			if (bootverbose)
-				device_printf(dev, "regulator %s registered\n",
-				    axp15060_regdefs[i].name);
+			device_printf(dev, "regulator %s registered\n",
+			    axp15060_regdefs[i].name);
 		}
 	}
 
