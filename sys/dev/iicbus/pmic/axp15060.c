@@ -51,9 +51,13 @@ struct axp15060_regdef {
 	uint8_t		enable_mask;
 	uint8_t		voltage_reg;
 	uint8_t		voltage_mask;
-	int		voltage_min;	/* mV */
-	int		voltage_max;	/* mV */
-	int		voltage_step;	/* mV, 0 = fixed/switch */
+	int		voltage_min1;	/* mV, range 1 start */
+	int		voltage_max1;	/* mV, range 1 end */
+	int		voltage_step1;	/* mV, range 1 step (0 = fixed/switch) */
+	int		voltage_nstep1;	/* Number of steps in range 1 */
+	int		voltage_min2;	/* mV, range 2 start (0 = single range) */
+	int		voltage_step2;	/* mV, range 2 step */
+	int		voltage_nstep2;	/* Number of steps in range 2 */
 };
 
 /* Per-regulator softc, stored inside each regnode */
@@ -73,99 +77,129 @@ struct axp15060_reg_sc {
  * single-step range that covers the most common use case.
  * Full two-step support is deferred to Step 3.
  */
+/*
+ * Regulator table macro helpers for readability.
+ * SIMPLE: single linear voltage range
+ * TWOSTEP: two linear ranges with different step sizes
+ * FIXED: fixed voltage, no control register
+ * SWITCH: on/off only, no voltage control
+ */
+#define	SIMPLE(id, nm, ereg, emask, vreg, vmask, min, max, step) \
+	{ (id), (nm), (ereg), (emask), (vreg), (vmask), \
+	  (min), (max), (step), (((max)-(min))/(step)), 0, 0, 0 }
+
+#define	TWOSTEP(id, nm, ereg, emask, vreg, vmask, \
+	    min1, step1, nstep1, min2, step2, nstep2) \
+	{ (id), (nm), (ereg), (emask), (vreg), (vmask), \
+	  (min1), (min1) + (nstep1) * (step1), (step1), (nstep1), \
+	  (min2), (step2), (nstep2) }
+
+#define	FIXED(id, nm, voltage) \
+	{ (id), (nm), 0, 0, 0, 0, (voltage), (voltage), 0, 0, 0, 0, 0 }
+
+#define	SWITCH(id, nm, ereg, emask) \
+	{ (id), (nm), (ereg), (emask), 0, 0, 0, 0, 0, 0, 0, 0, 0 }
+
 static struct axp15060_regdef axp15060_regdefs[] = {
-	{ AXP15060_REG_DCDC1, "dcdc1",
-	  AXP15060_PWR_OUT_CTRL1, AXP15060_DCDC1_EN,
-	  AXP15060_DCDC1_V_CTRL, AXP15060_DCDC1_V_MASK,
-	  1500, 3400, 100 },
-	{ AXP15060_REG_DCDC2, "dcdc2",
-	  AXP15060_PWR_OUT_CTRL1, AXP15060_DCDC2_EN,
-	  AXP15060_DCDC2_V_CTRL, AXP15060_DCDC2_V_MASK,
-	  500, 1540, 10 },
-	{ AXP15060_REG_DCDC3, "dcdc3",
-	  AXP15060_PWR_OUT_CTRL1, AXP15060_DCDC3_EN,
-	  AXP15060_DCDC3_V_CTRL, AXP15060_DCDC3_V_MASK,
-	  500, 1540, 10 },
-	{ AXP15060_REG_DCDC4, "dcdc4",
-	  AXP15060_PWR_OUT_CTRL1, AXP15060_DCDC4_EN,
-	  AXP15060_DCDC4_V_CTRL, AXP15060_DCDC4_V_MASK,
-	  500, 1540, 10 },
-	{ AXP15060_REG_DCDC5, "dcdc5",
-	  AXP15060_PWR_OUT_CTRL1, AXP15060_DCDC5_EN,
-	  AXP15060_DCDC5_V_CTRL, AXP15060_DCDC5_V_MASK,
-	  800, 1840, 10 },
-	{ AXP15060_REG_DCDC6, "dcdc6",
-	  AXP15060_PWR_OUT_CTRL1, AXP15060_DCDC6_EN,
-	  AXP15060_DCDC6_V_CTRL, AXP15060_DCDC6_V_MASK,
-	  500, 3400, 100 },
-	{ AXP15060_REG_ALDO1, "aldo1",
-	  AXP15060_PWR_OUT_CTRL2, AXP15060_ALDO1_EN,
-	  AXP15060_ALDO1_V_CTRL, AXP15060_ALDO_V_MASK,
-	  700, 3300, 100 },
-	{ AXP15060_REG_ALDO2, "aldo2",
-	  AXP15060_PWR_OUT_CTRL2, AXP15060_ALDO2_EN,
-	  AXP15060_ALDO2_V_CTRL, AXP15060_ALDO_V_MASK,
-	  700, 3300, 100 },
-	{ AXP15060_REG_ALDO3, "aldo3",
-	  AXP15060_PWR_OUT_CTRL2, AXP15060_ALDO3_EN,
-	  AXP15060_ALDO3_V_CTRL, AXP15060_ALDO_V_MASK,
-	  700, 3300, 100 },
-	{ AXP15060_REG_ALDO4, "aldo4",
-	  AXP15060_PWR_OUT_CTRL2, AXP15060_ALDO4_EN,
-	  AXP15060_ALDO4_V_CTRL, AXP15060_ALDO_V_MASK,
-	  700, 3300, 100 },
-	{ AXP15060_REG_ALDO5, "aldo5",
-	  AXP15060_PWR_OUT_CTRL2, AXP15060_ALDO5_EN,
-	  AXP15060_ALDO5_V_CTRL, AXP15060_ALDO_V_MASK,
-	  700, 3300, 100 },
-	{ AXP15060_REG_BLDO1, "bldo1",
-	  AXP15060_PWR_OUT_CTRL2, AXP15060_BLDO1_EN,
-	  AXP15060_BLDO1_V_CTRL, AXP15060_BLDO_V_MASK,
-	  700, 3300, 100 },
-	{ AXP15060_REG_BLDO2, "bldo2",
-	  AXP15060_PWR_OUT_CTRL2, AXP15060_BLDO2_EN,
-	  AXP15060_BLDO2_V_CTRL, AXP15060_BLDO_V_MASK,
-	  700, 3300, 100 },
-	{ AXP15060_REG_BLDO3, "bldo3",
-	  AXP15060_PWR_OUT_CTRL2, AXP15060_BLDO3_EN,
-	  AXP15060_BLDO3_V_CTRL, AXP15060_BLDO_V_MASK,
-	  700, 3300, 100 },
-	{ AXP15060_REG_BLDO4, "bldo4",
-	  AXP15060_PWR_OUT_CTRL3, AXP15060_BLDO4_EN,
-	  AXP15060_BLDO4_V_CTRL, AXP15060_BLDO_V_MASK,
-	  700, 3300, 100 },
-	{ AXP15060_REG_BLDO5, "bldo5",
-	  AXP15060_PWR_OUT_CTRL3, AXP15060_BLDO5_EN,
-	  AXP15060_BLDO5_V_CTRL, AXP15060_BLDO_V_MASK,
-	  700, 3300, 100 },
-	{ AXP15060_REG_CLDO1, "cldo1",
-	  AXP15060_PWR_OUT_CTRL3, AXP15060_CLDO1_EN,
-	  AXP15060_CLDO1_V_CTRL, AXP15060_CLDO1_V_MASK,
-	  700, 3300, 100 },
-	{ AXP15060_REG_CLDO2, "cldo2",
-	  AXP15060_PWR_OUT_CTRL3, AXP15060_CLDO2_EN,
-	  AXP15060_CLDO2_V_CTRL, AXP15060_CLDO2_V_MASK,
-	  700, 3300, 100 },
-	{ AXP15060_REG_CLDO3, "cldo3",
-	  AXP15060_PWR_OUT_CTRL3, AXP15060_CLDO3_EN,
-	  AXP15060_CLDO3_V_CTRL, AXP15060_CLDO3_V_MASK,
-	  700, 3300, 100 },
-	{ AXP15060_REG_CLDO4, "cldo4",
-	  AXP15060_PWR_OUT_CTRL3, (1 << 5),
-	  AXP15060_CLDO4_V_CTRL, AXP15060_CLDO4_V_MASK,
-	  700, 4200, 100 },
-	{ AXP15060_REG_CPUSLDO, "cpusldo",
-	  AXP15060_PWR_OUT_CTRL3, (1 << 6),
-	  AXP15060_CPUSLDO_V_CTRL, AXP15060_CPUSLDO_V_MASK,
-	  700, 1400, 50 },
-	{ AXP15060_REG_SW, "sw",
-	  AXP15060_PWR_OUT_CTRL3, (1 << 7),
-	  0, 0,
-	  0, 0, 0 },
-	{ AXP15060_REG_RTC_LDO, "rtc-ldo",
-	  0, 0,
-	  0, 0,
-	  1800, 1800, 0 },
+	/* DCDC1: 1500-3400mV, 100mV steps */
+	SIMPLE(AXP15060_REG_DCDC1, "dcdc1",
+	    AXP15060_PWR_OUT_CTRL1, AXP15060_DCDC1_EN,
+	    AXP15060_DCDC1_V_CTRL, AXP15060_DCDC1_V_MASK,
+	    1500, 3400, 100),
+	/* DCDC2: 500-1200mV@10mV, 1220-1540mV@20mV */
+	TWOSTEP(AXP15060_REG_DCDC2, "dcdc2",
+	    AXP15060_PWR_OUT_CTRL1, AXP15060_DCDC2_EN,
+	    AXP15060_DCDC2_V_CTRL, AXP15060_DCDC2_V_MASK,
+	    500, 10, 70, 1220, 20, 16),
+	/* DCDC3: same ranges as DCDC2 */
+	TWOSTEP(AXP15060_REG_DCDC3, "dcdc3",
+	    AXP15060_PWR_OUT_CTRL1, AXP15060_DCDC3_EN,
+	    AXP15060_DCDC3_V_CTRL, AXP15060_DCDC3_V_MASK,
+	    500, 10, 70, 1220, 20, 16),
+	/* DCDC4: same ranges as DCDC2 */
+	TWOSTEP(AXP15060_REG_DCDC4, "dcdc4",
+	    AXP15060_PWR_OUT_CTRL1, AXP15060_DCDC4_EN,
+	    AXP15060_DCDC4_V_CTRL, AXP15060_DCDC4_V_MASK,
+	    500, 10, 70, 1220, 20, 16),
+	/* DCDC5: 800-1120mV@10mV, 1140-1840mV@20mV */
+	TWOSTEP(AXP15060_REG_DCDC5, "dcdc5",
+	    AXP15060_PWR_OUT_CTRL1, AXP15060_DCDC5_EN,
+	    AXP15060_DCDC5_V_CTRL, AXP15060_DCDC5_V_MASK,
+	    800, 10, 32, 1140, 20, 35),
+	/* DCDC6: 500-3400mV, 100mV steps */
+	SIMPLE(AXP15060_REG_DCDC6, "dcdc6",
+	    AXP15060_PWR_OUT_CTRL1, AXP15060_DCDC6_EN,
+	    AXP15060_DCDC6_V_CTRL, AXP15060_DCDC6_V_MASK,
+	    500, 3400, 100),
+	/* ALDOs: 700-3300mV, 100mV steps */
+	SIMPLE(AXP15060_REG_ALDO1, "aldo1",
+	    AXP15060_PWR_OUT_CTRL2, AXP15060_ALDO1_EN,
+	    AXP15060_ALDO1_V_CTRL, AXP15060_ALDO_V_MASK,
+	    700, 3300, 100),
+	SIMPLE(AXP15060_REG_ALDO2, "aldo2",
+	    AXP15060_PWR_OUT_CTRL2, AXP15060_ALDO2_EN,
+	    AXP15060_ALDO2_V_CTRL, AXP15060_ALDO_V_MASK,
+	    700, 3300, 100),
+	SIMPLE(AXP15060_REG_ALDO3, "aldo3",
+	    AXP15060_PWR_OUT_CTRL2, AXP15060_ALDO3_EN,
+	    AXP15060_ALDO3_V_CTRL, AXP15060_ALDO_V_MASK,
+	    700, 3300, 100),
+	SIMPLE(AXP15060_REG_ALDO4, "aldo4",
+	    AXP15060_PWR_OUT_CTRL2, AXP15060_ALDO4_EN,
+	    AXP15060_ALDO4_V_CTRL, AXP15060_ALDO_V_MASK,
+	    700, 3300, 100),
+	SIMPLE(AXP15060_REG_ALDO5, "aldo5",
+	    AXP15060_PWR_OUT_CTRL2, AXP15060_ALDO5_EN,
+	    AXP15060_ALDO5_V_CTRL, AXP15060_ALDO_V_MASK,
+	    700, 3300, 100),
+	/* BLDOs: 700-3300mV, 100mV steps */
+	SIMPLE(AXP15060_REG_BLDO1, "bldo1",
+	    AXP15060_PWR_OUT_CTRL2, AXP15060_BLDO1_EN,
+	    AXP15060_BLDO1_V_CTRL, AXP15060_BLDO_V_MASK,
+	    700, 3300, 100),
+	SIMPLE(AXP15060_REG_BLDO2, "bldo2",
+	    AXP15060_PWR_OUT_CTRL2, AXP15060_BLDO2_EN,
+	    AXP15060_BLDO2_V_CTRL, AXP15060_BLDO_V_MASK,
+	    700, 3300, 100),
+	SIMPLE(AXP15060_REG_BLDO3, "bldo3",
+	    AXP15060_PWR_OUT_CTRL2, AXP15060_BLDO3_EN,
+	    AXP15060_BLDO3_V_CTRL, AXP15060_BLDO_V_MASK,
+	    700, 3300, 100),
+	SIMPLE(AXP15060_REG_BLDO4, "bldo4",
+	    AXP15060_PWR_OUT_CTRL3, AXP15060_BLDO4_EN,
+	    AXP15060_BLDO4_V_CTRL, AXP15060_BLDO_V_MASK,
+	    700, 3300, 100),
+	SIMPLE(AXP15060_REG_BLDO5, "bldo5",
+	    AXP15060_PWR_OUT_CTRL3, AXP15060_BLDO5_EN,
+	    AXP15060_BLDO5_V_CTRL, AXP15060_BLDO_V_MASK,
+	    700, 3300, 100),
+	/* CLDOs: 700-3300mV (cldo4: 700-4200mV), 100mV steps */
+	SIMPLE(AXP15060_REG_CLDO1, "cldo1",
+	    AXP15060_PWR_OUT_CTRL3, AXP15060_CLDO1_EN,
+	    AXP15060_CLDO1_V_CTRL, AXP15060_CLDO1_V_MASK,
+	    700, 3300, 100),
+	SIMPLE(AXP15060_REG_CLDO2, "cldo2",
+	    AXP15060_PWR_OUT_CTRL3, AXP15060_CLDO2_EN,
+	    AXP15060_CLDO2_V_CTRL, AXP15060_CLDO2_V_MASK,
+	    700, 3300, 100),
+	SIMPLE(AXP15060_REG_CLDO3, "cldo3",
+	    AXP15060_PWR_OUT_CTRL3, AXP15060_CLDO3_EN,
+	    AXP15060_CLDO3_V_CTRL, AXP15060_CLDO3_V_MASK,
+	    700, 3300, 100),
+	SIMPLE(AXP15060_REG_CLDO4, "cldo4",
+	    AXP15060_PWR_OUT_CTRL3, (1 << 5),
+	    AXP15060_CLDO4_V_CTRL, AXP15060_CLDO4_V_MASK,
+	    700, 4200, 100),
+	/* CPUSLDO: 700-1400mV, 50mV steps */
+	SIMPLE(AXP15060_REG_CPUSLDO, "cpusldo",
+	    AXP15060_PWR_OUT_CTRL3, (1 << 6),
+	    AXP15060_CPUSLDO_V_CTRL, AXP15060_CPUSLDO_V_MASK,
+	    700, 1400, 50),
+	/* SW: on/off only */
+	SWITCH(AXP15060_REG_SW, "sw",
+	    AXP15060_PWR_OUT_CTRL3, (1 << 7)),
+	/* RTC_LDO: fixed 1.8V, always on */
+	FIXED(AXP15060_REG_RTC_LDO, "rtc-ldo", 1800),
 };
 
 #define	NREGS	nitems(axp15060_regdefs)
@@ -275,10 +309,121 @@ axp15060_regnode_status(struct regnode *regnode, int *status)
 	return (0);
 }
 
+/*
+ * Convert a register selector value to microvolts.
+ * Handles both simple (single range) and two-step regulators.
+ */
+static void
+axp15060_sel_to_uvolt(struct axp15060_regdef *def, uint8_t sel, int *uvolt)
+{
+
+	if (def->voltage_step1 == 0) {
+		*uvolt = def->voltage_min1 * 1000;
+		return;
+	}
+
+	if (sel <= def->voltage_nstep1)
+		*uvolt = (def->voltage_min1 + sel * def->voltage_step1) * 1000;
+	else if (def->voltage_step2 > 0)
+		*uvolt = (def->voltage_min2 +
+		    (sel - def->voltage_nstep1 - 1) * def->voltage_step2) *
+		    1000;
+	else
+		*uvolt = def->voltage_max1 * 1000;
+}
+
+/*
+ * Convert microvolts to a register selector value.
+ * Returns 0 on success, ERANGE if the voltage is out of range.
+ */
+static int
+axp15060_uvolt_to_sel(struct axp15060_regdef *def, int min_uvolt,
+    int max_uvolt, uint8_t *sel)
+{
+	int target_mv, uvolt;
+	uint8_t s;
+
+	if (def->voltage_step1 == 0)
+		return (EINVAL);
+
+	target_mv = min_uvolt / 1000;
+
+	/* Search range 1 */
+	for (s = 0; s <= def->voltage_nstep1; s++) {
+		uvolt = (def->voltage_min1 + s * def->voltage_step1) * 1000;
+		if (uvolt >= min_uvolt && uvolt <= max_uvolt) {
+			*sel = s;
+			return (0);
+		}
+	}
+
+	/* Search range 2 */
+	if (def->voltage_step2 > 0) {
+		for (s = 0; s <= def->voltage_nstep2; s++) {
+			uvolt = (def->voltage_min2 +
+			    s * def->voltage_step2) * 1000;
+			if (uvolt >= min_uvolt && uvolt <= max_uvolt) {
+				*sel = def->voltage_nstep1 + 1 + s;
+				return (0);
+			}
+		}
+	}
+
+	return (ERANGE);
+}
+
+static int
+axp15060_regnode_get_voltage(struct regnode *regnode, int *uvolt)
+{
+	struct axp15060_reg_sc *sc = regnode_get_softc(regnode);
+	uint8_t val;
+
+	/* Fixed voltage (rtc-ldo) or switch */
+	if (sc->def->voltage_step1 == 0) {
+		*uvolt = sc->def->voltage_min1 * 1000;
+		return (0);
+	}
+
+	if (sc->def->voltage_reg == 0)
+		return (ENXIO);
+
+	axp15060_read(sc->base_dev, sc->def->voltage_reg, &val);
+	val &= sc->def->voltage_mask;
+	axp15060_sel_to_uvolt(sc->def, val, uvolt);
+
+	return (0);
+}
+
+static int
+axp15060_regnode_set_voltage(struct regnode *regnode, int min_uvolt,
+    int max_uvolt, int *udelay)
+{
+	struct axp15060_reg_sc *sc = regnode_get_softc(regnode);
+	uint8_t sel, val;
+	int error;
+
+	if (sc->def->voltage_step1 == 0 || sc->def->voltage_reg == 0)
+		return (EINVAL);
+
+	error = axp15060_uvolt_to_sel(sc->def, min_uvolt, max_uvolt, &sel);
+	if (error != 0)
+		return (error);
+
+	axp15060_read(sc->base_dev, sc->def->voltage_reg, &val);
+	val &= ~sc->def->voltage_mask;
+	val |= (sel & sc->def->voltage_mask);
+	axp15060_write(sc->base_dev, sc->def->voltage_reg, val);
+
+	*udelay = 0;
+	return (0);
+}
+
 static regnode_method_t axp15060_regnode_methods[] = {
 	REGNODEMETHOD(regnode_init,		axp15060_regnode_init),
 	REGNODEMETHOD(regnode_enable,		axp15060_regnode_enable),
 	REGNODEMETHOD(regnode_status,		axp15060_regnode_status),
+	REGNODEMETHOD(regnode_get_voltage,	axp15060_regnode_get_voltage),
+	REGNODEMETHOD(regnode_set_voltage,	axp15060_regnode_set_voltage),
 	REGNODEMETHOD(regnode_check_voltage,	regnode_method_check_voltage),
 	REGNODEMETHOD_END
 };
@@ -298,9 +443,9 @@ axp15060_reg_attach(device_t dev, phandle_t node, struct axp15060_regdef *def)
 	if (regulator_parse_ofw_stdparam(dev, node, &initdef) != 0)
 		return (NULL);
 	if (initdef.std_param.min_uvolt == 0)
-		initdef.std_param.min_uvolt = def->voltage_min * 1000;
+		initdef.std_param.min_uvolt = def->voltage_min1 * 1000;
 	if (initdef.std_param.max_uvolt == 0)
-		initdef.std_param.max_uvolt = def->voltage_max * 1000;
+		initdef.std_param.max_uvolt = def->voltage_max1 * 1000;
 	initdef.id = def->id;
 	initdef.ofw_node = node;
 
@@ -437,11 +582,11 @@ axp15060_attach(device_t dev)
 			memset(&initdef, 0, sizeof(initdef));
 			initdef.name = axp15060_regdefs[i].name;
 			initdef.id = axp15060_regdefs[i].id;
-			if (axp15060_regdefs[i].voltage_min > 0) {
+			if (axp15060_regdefs[i].voltage_min1 > 0) {
 				initdef.std_param.min_uvolt =
-				    axp15060_regdefs[i].voltage_min * 1000;
+				    axp15060_regdefs[i].voltage_min1 * 1000;
 				initdef.std_param.max_uvolt =
-				    axp15060_regdefs[i].voltage_max * 1000;
+				    axp15060_regdefs[i].voltage_max1 * 1000;
 			}
 			regnode = regnode_create(dev,
 			    &axp15060_regnode_class, &initdef);
