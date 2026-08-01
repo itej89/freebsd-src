@@ -400,31 +400,17 @@ axp15060_regnode_set_voltage(struct regnode *regnode, int min_uvolt,
 	uint8_t sel, val;
 	int error;
 
-	device_printf(sc->base_dev,
-	    "set_voltage %s: %d-%d uV\n",
-	    sc->def->name, min_uvolt, max_uvolt);
-
 	if (sc->def->voltage_step1 == 0 || sc->def->voltage_reg == 0)
 		return (EINVAL);
 
 	error = axp15060_uvolt_to_sel(sc->def, min_uvolt, max_uvolt, &sel);
-	if (error != 0) {
-		device_printf(sc->base_dev,
-		    "set_voltage %s: uvolt_to_sel failed: %d\n",
-		    sc->def->name, error);
+	if (error != 0)
 		return (error);
-	}
 
 	axp15060_read(sc->base_dev, sc->def->voltage_reg, &val);
-	device_printf(sc->base_dev,
-	    "set_voltage %s: reg 0x%02x was 0x%02x, sel %d\n",
-	    sc->def->name, sc->def->voltage_reg, val, sel);
 	val &= ~sc->def->voltage_mask;
 	val |= (sel & sc->def->voltage_mask);
-	error = axp15060_write(sc->base_dev, sc->def->voltage_reg, val);
-	device_printf(sc->base_dev,
-	    "set_voltage %s: wrote 0x%02x, error %d\n",
-	    sc->def->name, val, error);
+	axp15060_write(sc->base_dev, sc->def->voltage_reg, val);
 
 	*udelay = 0;
 	return (0);
