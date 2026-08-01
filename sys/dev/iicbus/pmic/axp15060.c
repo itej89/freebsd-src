@@ -162,6 +162,10 @@ static struct axp15060_regdef axp15060_regdefs[] = {
 	  AXP15060_PWR_OUT_CTRL3, (1 << 7),
 	  0, 0,
 	  0, 0, 0 },
+	{ AXP15060_REG_RTC_LDO, "rtc-ldo",
+	  0, 0,
+	  0, 0,
+	  1800, 1800, 0 },
 };
 
 #define	NREGS	nitems(axp15060_regdefs)
@@ -234,6 +238,12 @@ axp15060_regnode_enable(struct regnode *regnode, bool enable, int *udelay)
 	struct axp15060_reg_sc *sc = regnode_get_softc(regnode);
 	uint8_t val;
 
+	/* No enable register = always on (e.g., rtc-ldo) */
+	if (sc->def->enable_mask == 0) {
+		*udelay = 0;
+		return (enable ? 0 : EINVAL);
+	}
+
 	axp15060_read(sc->base_dev, sc->def->enable_reg, &val);
 	if (enable)
 		val |= sc->def->enable_mask;
@@ -250,6 +260,12 @@ axp15060_regnode_status(struct regnode *regnode, int *status)
 {
 	struct axp15060_reg_sc *sc = regnode_get_softc(regnode);
 	uint8_t val;
+
+	/* No enable register = always on */
+	if (sc->def->enable_mask == 0) {
+		*status = REGULATOR_STATUS_ENABLED;
+		return (0);
+	}
 
 	*status = 0;
 	axp15060_read(sc->base_dev, sc->def->enable_reg, &val);
