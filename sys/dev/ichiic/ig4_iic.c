@@ -1045,7 +1045,9 @@ ig4iic_attach(ig4iic_softc_t *sc)
 		goto done;
 	ig4iic_get_fifo(sc);
 
-	sc->iicbus = device_add_child(sc->dev, "iicbus", DEVICE_UNIT_ANY);
+	sc->iicbus = device_add_child(sc->dev,
+	    ofw_bus_get_node(sc->dev) > 0 ? "ofw_iicbus" : "iicbus",
+	    DEVICE_UNIT_ANY);
 	if (sc->iicbus == NULL) {
 		device_printf(sc->dev, "iicbus driver not found\n");
 		error = ENXIO;
@@ -1217,6 +1219,9 @@ ig4iic_dump(ig4iic_softc_t *sc)
 #undef REGDUMP
 
 DRIVER_MODULE(iicbus, ig4iic, iicbus_driver, NULL, NULL);
+#ifdef FDT
+DRIVER_MODULE(ofw_iicbus, ig4iic, ofw_iicbus_driver, NULL, NULL);
+#endif
 #ifdef DEV_ACPI
 DRIVER_MODULE(acpi_iicbus, ig4iic, acpi_iicbus_driver, NULL, NULL);
 #endif

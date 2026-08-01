@@ -7,7 +7,6 @@ device		uart_snps	# DesignWare Synopsis UART driver
 device		ig4iic		# DesignWare I2C controller (FDT)
 device		iicbus		# I2C bus framework
 device		iic		# /dev/iic* userspace interface
-device		ofw_iicbus	# FDT-aware I2C bus (enumerates DT child devices)
 device		axp15060	# X-Powers AXP15060 PMIC
 
 device		eqos
