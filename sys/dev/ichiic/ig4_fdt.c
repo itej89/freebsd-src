@@ -19,6 +19,7 @@
 #include <machine/bus.h>
 #include <machine/resource.h>
 
+#include <dev/iicbus/iicbus.h>
 #include <dev/iicbus/iiconf.h>
 
 /*
