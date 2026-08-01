@@ -951,6 +951,20 @@ eqos_get_eaddr(struct eqos_softc *sc, uint8_t *eaddr)
 {
 	uint32_t maclo, machi;
 
+#ifdef FDT
+	phandle_t node;
+
+	node = ofw_bus_get_node(sc->dev);
+	if (node > 0 && OF_getprop(node, "local-mac-address", eaddr,
+	    ETHER_ADDR_LEN) == ETHER_ADDR_LEN) {
+		device_printf(sc->dev, "MAC from device tree: "
+		    "%02x:%02x:%02x:%02x:%02x:%02x\n",
+		    eaddr[0], eaddr[1], eaddr[2],
+		    eaddr[3], eaddr[4], eaddr[5]);
+		return;
+	}
+#endif
+
 	maclo = htobe32(RD4(sc, GMAC_MAC_ADDRESS0_LOW));
 	machi = htobe16(RD4(sc, GMAC_MAC_ADDRESS0_HIGH) & 0xFFFF);
 
