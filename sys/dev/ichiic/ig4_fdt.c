@@ -26,6 +26,7 @@
  * These headers let us read properties from the DTB like "compatible",
  * "reg", "clocks", "resets", etc.
  */
+#include <dev/ofw/openfirm.h>
 #include <dev/ofw/ofw_bus.h>
 #include <dev/ofw/ofw_bus_subr.h>
 
@@ -257,6 +258,13 @@ ig4iic_fdt_detach(device_t dev)
  * Think of it as a vtable in C++ — function pointers that the
  * kernel calls at the right time.
  */
+static phandle_t
+ig4iic_fdt_get_node(device_t bus, device_t dev)
+{
+
+	return (ofw_bus_get_node(bus));
+}
+
 static device_method_t ig4iic_fdt_methods[] = {
 	/* Device interface */
 	DEVMETHOD(device_probe,		ig4iic_fdt_probe),
@@ -273,6 +281,9 @@ static device_method_t ig4iic_fdt_methods[] = {
 	DEVMETHOD(bus_activate_resource,	bus_generic_activate_resource),
 	DEVMETHOD(bus_deactivate_resource,	bus_generic_deactivate_resource),
 	DEVMETHOD(bus_adjust_resource,		bus_generic_adjust_resource),
+
+	/* ofw_bus interface — lets ofw_iicbus find our DT node */
+	DEVMETHOD(ofw_bus_get_node,	ig4iic_fdt_get_node),
 
 	/* iicbus interface — delegated to ig4 core driver */
 	DEVMETHOD(iicbus_transfer,	ig4iic_transfer),
