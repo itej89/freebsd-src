@@ -340,13 +340,11 @@ static int
 axp15060_uvolt_to_sel(struct axp15060_regdef *def, int min_uvolt,
     int max_uvolt, uint8_t *sel)
 {
-	int target_mv, uvolt;
+	int uvolt;
 	uint8_t s;
 
 	if (def->voltage_step1 == 0)
 		return (EINVAL);
-
-	target_mv = min_uvolt / 1000;
 
 	/* Search range 1 */
 	for (s = 0; s <= def->voltage_nstep1; s++) {
