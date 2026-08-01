@@ -16,6 +16,7 @@ dev/eqos/if_eqos_starfive.c		optional	eqos
 
 riscv/starfive/jh7110_gpio.c		standard
 riscv/starfive/jh7110_rtc.c		standard
+riscv/starfive/jh7110_temp.c		standard
 riscv/starfive/jh7110_wdt.c		standard
 riscv/starfive/jh7110_pcie.c		optional	pci fdt
 riscv/starfive/starfive_syscon.c	standard
