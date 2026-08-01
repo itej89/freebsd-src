@@ -129,12 +129,12 @@ jh7110_temp_attach(device_t dev)
 	}
 
 	/* Enable clocks: "sense" and "bus" */
-	if (clk_get_by_ofw_name(dev, 0, "sense", &sc->clk_sense) == 0)
-		clk_enable(sc->clk_sense);
 	if (clk_get_by_ofw_name(dev, 0, "bus", &sc->clk_bus) == 0)
 		clk_enable(sc->clk_bus);
+	if (clk_get_by_ofw_name(dev, 0, "sense", &sc->clk_sense) == 0)
+		clk_enable(sc->clk_sense);
 
-	/* Deassert resets: "sense" and "bus" */
+	/* Deassert resets: bus first, then sense */
 	for (int i = 0; hwreset_get_by_ofw_idx(dev, 0, i, &rst) == 0; i++)
 		hwreset_deassert(rst);
 
@@ -142,11 +142,11 @@ jh7110_temp_attach(device_t dev)
 	jh7110_temp_power_up(sc);
 	jh7110_temp_run(sc);
 
-	/* Read initial temperature */
-	DELAY(1000);
+	/* Wait for conversion to complete (needs ~100us per the datasheet) */
+	DELAY(100000);
 	temp = jh7110_temp_read_mC(sc);
-	device_printf(dev, "current temperature: %d.%d C\n",
-	    temp / 1000, (temp % 1000) / 100);
+	device_printf(dev, "raw reg: 0x%08x, temperature: %d.%d C\n",
+	    RD4(sc, 0), temp / 1000, (temp % 1000) / 100);
 
 	/* Export via sysctl */
 	SYSCTL_ADD_PROC(device_get_sysctl_ctx(dev),
