@@ -241,18 +241,18 @@ static int
 axp15060_write(device_t dev, uint8_t reg, uint8_t val)
 {
 	struct axp15060_softc *sc = device_get_softc(dev);
-	struct iic_msg msg;
-	uint8_t buf[2];
+	struct iic_msg msgs[2];
 
-	buf[0] = reg;
-	buf[1] = val;
+	msgs[0].slave = sc->addr;
+	msgs[0].flags = IIC_M_WR;
+	msgs[0].len = 1;
+	msgs[0].buf = &reg;
+	msgs[1].slave = sc->addr;
+	msgs[1].flags = IIC_M_WR;
+	msgs[1].len = 1;
+	msgs[1].buf = &val;
 
-	msg.slave = sc->addr;
-	msg.flags = IIC_M_WR;
-	msg.len = 2;
-	msg.buf = buf;
-
-	return (iicbus_transfer(dev, &msg, 1));
+	return (iicbus_transfer(dev, msgs, 2));
 }
 
 /* ================================================================
@@ -421,7 +421,6 @@ static regnode_method_t axp15060_regnode_methods[] = {
 	REGNODEMETHOD(regnode_enable,		axp15060_regnode_enable),
 	REGNODEMETHOD(regnode_status,		axp15060_regnode_status),
 	REGNODEMETHOD(regnode_get_voltage,	axp15060_regnode_get_voltage),
-	REGNODEMETHOD(regnode_set_voltage,	axp15060_regnode_set_voltage),
 	REGNODEMETHOD(regnode_check_voltage,	regnode_method_check_voltage),
 	REGNODEMETHOD_END
 };
