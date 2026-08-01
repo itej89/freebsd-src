@@ -330,5 +330,6 @@ static driver_t ig4iic_fdt_driver = {
  */
 DRIVER_MODULE_ORDERED(ig4iic, simplebus, ig4iic_fdt_driver, 0, 0,
     SI_ORDER_ANY);
+DRIVER_MODULE(ofw_iicbus, ig4iic, ofw_iicbus_driver, NULL, NULL);
 MODULE_DEPEND(ig4iic, iicbus, 1, 1, 1);
 SIMPLEBUS_PNP_INFO(compat_data);
