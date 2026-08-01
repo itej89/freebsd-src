@@ -312,8 +312,8 @@ static driver_t ig4iic_fdt_driver = {
  * (PCI version says "ig4iic on pci", ACPI version says "ig4iic on acpi")
  */
 EARLY_DRIVER_MODULE(ig4iic, simplebus, ig4iic_fdt_driver, 0, 0,
-    BUS_PASS_BUS);
+    BUS_PASS_INTERRUPT + BUS_PASS_ORDER_LATE);
 EARLY_DRIVER_MODULE(ofw_iicbus, ig4iic, ofw_iicbus_driver, 0, 0,
-    BUS_PASS_BUS);
+    BUS_PASS_INTERRUPT + BUS_PASS_ORDER_LATE);
 MODULE_DEPEND(ig4iic, iicbus, 1, 1, 1);
 SIMPLEBUS_PNP_INFO(compat_data);
