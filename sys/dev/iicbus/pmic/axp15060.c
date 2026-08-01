@@ -32,6 +32,7 @@
 #include <dev/iicbus/iicbus.h>
 #include <dev/iicbus/iiconf.h>
 
+#include <dev/ofw/openfirm.h>
 #include <dev/ofw/ofw_bus.h>
 #include <dev/ofw/ofw_bus_subr.h>
 
@@ -143,6 +144,13 @@ axp15060_shutdown(void *devp, int howto)
 	DELAY(500000);
 }
 
+static phandle_t
+axp15060_get_node(device_t dev, device_t bus)
+{
+
+	return (ofw_bus_get_node(dev));
+}
+
 static int
 axp15060_probe(device_t dev)
 {
@@ -203,7 +211,7 @@ static device_method_t axp15060_methods[] = {
 	DEVMETHOD(device_detach,	axp15060_detach),
 
 	/* ofw_bus interface — needed for DT child matching */
-	DEVMETHOD(ofw_bus_get_node,	iicbus_get_node),
+	DEVMETHOD(ofw_bus_get_node,	axp15060_get_node),
 
 	DEVMETHOD_END,
 };
