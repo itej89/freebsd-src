@@ -6,6 +6,7 @@ device		uart_snps	# DesignWare Synopsis UART driver
 
 device		ig4iic		# DesignWare I2C controller (FDT)
 device		iicbus		# I2C bus framework
+device		iic		# /dev/iic* userspace interface
 
 device		eqos
 
