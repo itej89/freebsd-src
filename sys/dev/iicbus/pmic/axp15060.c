@@ -211,6 +211,7 @@ struct axp15060_softc {
 	struct mtx		mtx;
 	struct axp15060_reg_sc	**regs;
 	int			nregs;
+	bool			boot_done;
 };
 
 static struct ofw_compat_data compat_data[] = {
@@ -224,6 +225,9 @@ axp15060_read(device_t dev, uint8_t reg, uint8_t *val)
 {
 	struct axp15060_softc *sc = device_get_softc(dev);
 	struct iic_msg msgs[2];
+	int error;
+
+	mtx_lock(&sc->mtx);
 
 	msgs[0].slave = sc->addr;
 	msgs[0].flags = IIC_M_WR;
@@ -234,25 +238,34 @@ axp15060_read(device_t dev, uint8_t reg, uint8_t *val)
 	msgs[1].len = 1;
 	msgs[1].buf = val;
 
-	return (iicbus_transfer(dev, msgs, 2));
+	error = iicbus_transfer(dev, msgs, 2);
+
+	mtx_unlock(&sc->mtx);
+	return (error);
 }
 
 static int
 axp15060_write(device_t dev, uint8_t reg, uint8_t val)
 {
 	struct axp15060_softc *sc = device_get_softc(dev);
-	struct iic_msg msgs[2];
+	struct iic_msg msg;
+	uint8_t buf[2];
+	int error;
 
-	msgs[0].slave = sc->addr;
-	msgs[0].flags = IIC_M_WR;
-	msgs[0].len = 1;
-	msgs[0].buf = &reg;
-	msgs[1].slave = sc->addr;
-	msgs[1].flags = IIC_M_WR;
-	msgs[1].len = 1;
-	msgs[1].buf = &val;
+	buf[0] = reg;
+	buf[1] = val;
 
-	return (iicbus_transfer(dev, msgs, 2));
+	mtx_lock(&sc->mtx);
+
+	msg.slave = sc->addr;
+	msg.flags = IIC_M_WR;
+	msg.len = 2;
+	msg.buf = buf;
+
+	error = iicbus_transfer(dev, &msg, 1);
+
+	mtx_unlock(&sc->mtx);
+	return (error);
 }
 
 /* ================================================================
@@ -397,11 +410,18 @@ axp15060_regnode_set_voltage(struct regnode *regnode, int min_uvolt,
     int max_uvolt, int *udelay)
 {
 	struct axp15060_reg_sc *sc = regnode_get_softc(regnode);
+	struct axp15060_softc *pmic;
 	uint8_t sel, val;
 	int error;
 
 	if (sc->def->voltage_step1 == 0 || sc->def->voltage_reg == 0)
 		return (EINVAL);
+
+	pmic = device_get_softc(sc->base_dev);
+	if (!pmic->boot_done) {
+		*udelay = 0;
+		return (0);
+	}
 
 	error = axp15060_uvolt_to_sel(sc->def, min_uvolt, max_uvolt, &sel);
 	if (error != 0)
@@ -421,6 +441,7 @@ static regnode_method_t axp15060_regnode_methods[] = {
 	REGNODEMETHOD(regnode_enable,		axp15060_regnode_enable),
 	REGNODEMETHOD(regnode_status,		axp15060_regnode_status),
 	REGNODEMETHOD(regnode_get_voltage,	axp15060_regnode_get_voltage),
+	REGNODEMETHOD(regnode_set_voltage,	axp15060_regnode_set_voltage),
 	REGNODEMETHOD(regnode_check_voltage,	regnode_method_check_voltage),
 	REGNODEMETHOD_END
 };
@@ -487,6 +508,16 @@ axp15060_regdev_map(device_t dev, phandle_t xref, int ncells, pcell_t *cells,
 /* ================================================================
  * Shutdown handler
  * ================================================================ */
+
+static void
+axp15060_boot_done(void *devp)
+{
+	device_t dev = (device_t)devp;
+	struct axp15060_softc *sc = device_get_softc(dev);
+
+	sc->boot_done = true;
+	device_printf(dev, "voltage control enabled\n");
+}
 
 static void
 axp15060_shutdown(void *devp, int howto)
@@ -613,6 +644,8 @@ axp15060_attach(device_t dev)
 
 	EVENTHANDLER_REGISTER(shutdown_final, axp15060_shutdown, dev,
 	    SHUTDOWN_PRI_LAST);
+
+	config_intrhook_oneshot(axp15060_boot_done, dev);
 
 	return (0);
 }
