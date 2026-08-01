@@ -6,6 +6,8 @@ dev/clk/starfive/jh7110_clk_stg.c	standard
 dev/ichiic/ig4_iic.c			optional	ig4iic
 dev/ichiic/ig4_fdt.c			optional	ig4iic fdt
 
+dev/iicbus/pmic/axp15060.c		optional	axp15060
+
 dev/mmc/host/dwmmc_starfive.c		optional	dwmmc_starfive fdt
 
 dev/eqos/if_eqos.c			optional	eqos
