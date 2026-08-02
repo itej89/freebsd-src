@@ -3,6 +3,7 @@ dev/clk/starfive/jh7110_clk_aon.c	standard
 dev/clk/starfive/jh7110_clk_pll.c	standard
 dev/clk/starfive/jh7110_clk_sys.c	standard
 dev/clk/starfive/jh7110_clk_stg.c	standard
+dev/clk/starfive/jh7110_clk_vout.c	standard
 dev/ichiic/ig4_iic.c			optional	ig4iic
 dev/ichiic/ig4_fdt.c			optional	ig4iic fdt
 
