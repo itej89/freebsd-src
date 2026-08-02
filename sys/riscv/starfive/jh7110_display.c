@@ -167,7 +167,8 @@ jh7110_hdmi_init(struct jh7110_display_softc *sc)
 {
 	phandle_t node;
 	hwreset_t rst;
-	int timeout;
+	clk_t clk;
+	int i, timeout;
 
 	/* Map HDMI registers at fixed address */
 	sc->hdmi_rid = 2;
@@ -178,19 +179,24 @@ jh7110_hdmi_init(struct jh7110_display_softc *sc)
 		return (ENXIO);
 	}
 
-	/*
-	 * HDMI clocks come from VOUT clock domain (already powered on).
-	 * They were enabled as part of DC8200 clock init since the DTS
-	 * references VOUT clocks directly. HDMI TX reset needs to be
-	 * deasserted — find it from the HDMI DTS node.
-	 */
+	device_printf(sc->dev, "HDMI registers mapped\n");
+
+	/* Enable HDMI clocks and deassert reset from the HDMI DTS node */
 	node = OF_finddevice("/soc/hdmi@29590000");
 	if (node > 0) {
+		for (i = 0; clk_get_by_ofw_index(sc->dev, node, i, &clk) == 0; i++)
+			clk_enable(clk);
+		device_printf(sc->dev, "HDMI: enabled %d clocks\n", i);
+
 		if (hwreset_get_by_ofw_idx(sc->dev, node, 0, &rst) == 0)
 			hwreset_deassert(rst);
 	}
 
 	DELAY(50000);
+
+	/* Pre-init: set bit 2 of 0x1b0, configure 0x1cc */
+	HDMI_WR(sc, 0x1b0, HDMI_RD(sc, 0x1b0) | 0x04);
+	HDMI_WR(sc, 0x1cc, 0x0f);
 
 	/* PHY power down */
 	HDMI_WR(sc, 0x00, 0x63);
@@ -217,23 +223,33 @@ jh7110_hdmi_init(struct jh7110_display_softc *sc)
 	HDMI_WR(sc, 0x1aa, 0x0e);
 	HDMI_WR(sc, 0x1a0, 0x00);
 
-	/* Wait for PLL lock */
-	timeout = 100000;
+	/* Wait for PLL lock (non-fatal on timeout) */
+	device_printf(sc->dev, "HDMI: waiting for pre-PLL lock...\n");
+	timeout = 500000;
 	while (!(HDMI_RD(sc, 0x1a9) & 0x1) && --timeout > 0)
 		DELAY(1);
 	if (timeout == 0)
-		device_printf(sc->dev, "HDMI pre-PLL lock timeout\n");
+		device_printf(sc->dev, "HDMI: pre-PLL lock timeout (continuing)\n");
+	else
+		device_printf(sc->dev, "HDMI: pre-PLL locked\n");
 
-	timeout = 100000;
+	device_printf(sc->dev, "HDMI: waiting for post-PLL lock...\n");
+	timeout = 500000;
 	while (!(HDMI_RD(sc, 0x1af) & 0x1) && --timeout > 0)
 		DELAY(1);
 	if (timeout == 0)
-		device_printf(sc->dev, "HDMI post-PLL lock timeout\n");
+		device_printf(sc->dev, "HDMI: post-PLL lock timeout (continuing)\n");
+	else
+		device_printf(sc->dev, "HDMI: post-PLL locked\n");
 
 	/* Turn on LDO */
 	HDMI_WR(sc, 0x1b4, 0x07);
 	/* Turn on serializer */
 	HDMI_WR(sc, 0x1be, 0x71);
+
+	/* Eye diagram improvement for 720p (VIC 4) */
+	HDMI_WR(sc, 0x1bf, 0x00);
+	HDMI_WR(sc, 0x1c0, 0x00);
 
 	/* PHY power down before timing config */
 	HDMI_WR(sc, 0x00, 0x63);

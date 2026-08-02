@@ -287,6 +287,7 @@
 		compatible = "fixed-clock";
 		clock-output-names = "hdmitx0_pixelclk";
 		#clock-cells = <0>;
+		clock-frequency = <74250000>;
 	};
 
 	i2srx_bclk_ext: i2srx-bclk-ext-clock {
