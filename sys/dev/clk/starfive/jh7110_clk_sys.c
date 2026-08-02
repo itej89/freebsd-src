@@ -121,6 +121,80 @@ static const char *tdm_internal_p[] = { "apb_bus" };
 static const char *pdm_apb_p[] = { "apb_bus" };
 static const char *jtag_trng_p[] = { "osc" };
 
+/* Foundation/intermediate clocks */
+static const char *pll0_div2_p[] = { "pll0_out" };
+static const char *pll1_div2_p[] = { "pll1_out" };
+static const char *pll2_div2_p[] = { "pll2_out" };
+static const char *audio_root_p[] = { "pll2_out" };
+static const char *mclk_inner_p[] = { "audio_root" };
+static const char *mclk_p[] = { "mclk_inner", "mclk_ext" };
+static const char *mclk_out_p[] = { "mclk_inner" };
+static const char *osc_div2_p[] = { "osc" };
+static const char *pll1_div4_p[] = { "pll1_div2" };
+static const char *pll1_div8_p[] = { "pll1_div4" };
+static const char *ddr_bus_p[] = { "osc_div2", "pll1_div2", "pll1_div4", "pll1_div8" };
+static const char *rtc_toggle_p[] = { "osc" };
+static const char *gpu_root_p[] = { "pll0_out", "pll2_out" };
+static const char *gpu_core_p[] = { "gpu_root" };
+static const char *gpu_core_clk_p[] = { "gpu_core" };
+static const char *gpu_sys_clk_p[] = { "isp_axi" };
+static const char *gpu_apb_p[] = { "apb_bus" };
+static const char *gpu_rtc_p[] = { "osc" };
+static const char *noc_gpu_p[] = { "gpu_core" };
+static const char *isp_2x_p[] = { "pll0_out" };
+static const char *isp_axi_p[] = { "isp_2x" };
+static const char *isp_top_core_p[] = { "isp_2x" };
+static const char *isp_top_axi_p[] = { "isp_axi" };
+static const char *noc_isp_p[] = { "isp_axi" };
+static const char *hifi4_core_p[] = { "bus_root" };
+static const char *hifi4_axi_p[] = { "hifi4_core" };
+static const char *vout_src_p[] = { "pll2_out" };
+static const char *vout_axi_p[] = { "pll2_out" };
+static const char *noc_disp_p[] = { "vout_axi" };
+static const char *vout_ahb_p[] = { "ahb1" };
+static const char *vout_top_axi_p[] = { "vout_axi" };
+static const char *vout_mclk_p[] = { "mclk" };
+static const char *vout_mipi_p[] = { "osc" };
+static const char *jpegc_axi_p[] = { "pll2_out" };
+static const char *codaj12_axi_p[] = { "jpegc_axi" };
+static const char *codaj12_core_p[] = { "pll2_out" };
+static const char *codaj12_apb_p[] = { "apb_bus" };
+static const char *vdec_axi_p[] = { "bus_root" };
+static const char *wave511_axi_p[] = { "vdec_axi" };
+static const char *wave511_bpu_p[] = { "bus_root" };
+static const char *wave511_vce_p[] = { "pll0_out" };
+static const char *wave511_apb_p[] = { "apb_bus" };
+static const char *vdec_jpg_p[] = { "jpegc_axi" };
+static const char *vdec_main_p[] = { "vdec_axi" };
+static const char *noc_vdec_p[] = { "vdec_axi" };
+static const char *venc_axi_p[] = { "pll2_out" };
+static const char *wave420l_axi_p[] = { "venc_axi" };
+static const char *wave420l_bpu_p[] = { "pll2_out" };
+static const char *wave420l_vce_p[] = { "pll2_out" };
+static const char *wave420l_apb_p[] = { "apb_bus" };
+static const char *noc_venc_p[] = { "venc_axi" };
+
+/* CPU/debug/trace */
+static const char *core_p[] = { "cpu_core" };
+static const char *debug_p[] = { "cpu_bus" };
+static const char *trace_com_p[] = { "cpu_bus" };
+static const char *ddr_axi_p[] = { "ddr_bus" };
+static const char *axi_cfg0_main_p[] = { "axi_cfg0" };
+static const char *axi_cfg1_p[] = { "stg_axiahb" };
+static const char *aximem2_p[] = { "axi_cfg0" };
+
+/* I2S clocks (non-MDIV ones only) */
+static const char *i2stx0_apb_p[] = { "apb0" };
+static const char *i2stx0_bclk_mst_p[] = { "mclk" };
+static const char *i2stx1_apb_p[] = { "apb0" };
+static const char *i2stx1_bclk_mst_p[] = { "mclk" };
+static const char *i2srx_apb_p[] = { "apb0" };
+static const char *i2srx_bclk_mst_p[] = { "mclk" };
+static const char *pdm_dmic_p[] = { "mclk" };
+static const char *gclk0_p[] = { "pll0_div2" };
+static const char *gclk1_p[] = { "pll1_div2" };
+static const char *gclk2_p[] = { "pll2_div2" };
+
 /* non-pll SYS clocks */
 static const struct jh7110_clk_def sys_clks[] = {
 	JH7110_MUX(JH7110_SYSCLK_CPU_ROOT, "cpu_root", cpu_root_p),
@@ -197,8 +271,7 @@ static const struct jh7110_clk_def sys_clks[] = {
 	    qspi_ref_src_p, 16),
 	JH7110_GATEMUX(JH7110_SYSCLK_QSPI_REF, "qspi_ref", qspi_ref_p),
 
-	/* Misc (112-114) */
-	JH7110_GATE(JH7110_SYSCLK_IOMUX_APB, "iomux_apb", u0_sys_iomux_apb_p),
+	/* Misc (113-114) */
 	JH7110_GATE(JH7110_SYSCLK_MAILBOX_APB, "mailbox_apb", apb_bus_p),
 	JH7110_GATE(JH7110_SYSCLK_INT_CTRL_APB, "int_ctrl_apb", apb_bus_p),
 
@@ -263,6 +336,162 @@ static const struct jh7110_clk_def sys_clks[] = {
 	/* JTAG/TRNG (189) */
 	JH7110_GATE(JH7110_SYSCLK_JTAG_CERTIFICATION_TRNG, "jtag_trng",
 	    jtag_trng_p),
+
+	/* Foundation: PLL dividers */
+	JH7110_DIV(JH7110_SYSCLK_PLL0_DIV2, "pll0_div2", pll0_div2_p, 2),
+	JH7110_DIV(JH7110_SYSCLK_PLL1_DIV2, "pll1_div2", pll1_div2_p, 2),
+	JH7110_DIV(JH7110_SYSCLK_PLL2_DIV2, "pll2_div2", pll2_div2_p, 2),
+	JH7110_DIV(JH7110_SYSCLK_OSC_DIV2, "osc_div2", osc_div2_p, 2),
+	JH7110_DIV(JH7110_SYSCLK_PLL1_DIV4, "pll1_div4", pll1_div4_p, 2),
+	JH7110_DIV(JH7110_SYSCLK_PLL1_DIV8, "pll1_div8", pll1_div8_p, 2),
+	JH7110_DIV(JH7110_SYSCLK_RTC_TOGGLE, "rtc_toggle", rtc_toggle_p, 6),
+
+	/* Audio root chain */
+	JH7110_DIV(JH7110_SYSCLK_AUDIO_ROOT, "audio_root", audio_root_p, 8),
+	JH7110_DIV(JH7110_SYSCLK_MCLK_INNER, "mclk_inner", mclk_inner_p, 64),
+	JH7110_MUX(JH7110_SYSCLK_MCLK, "mclk", mclk_p),
+	JH7110_GATE(JH7110_SYSCLK_MCLK_OUT, "mclk_out", mclk_out_p),
+
+	/* GCLKs */
+	JH7110_GATEDIV(JH7110_SYSCLK_GCLK0, "gclk0", gclk0_p, 62),
+	JH7110_GATEDIV(JH7110_SYSCLK_GCLK1, "gclk1", gclk1_p, 62),
+	JH7110_GATEDIV(JH7110_SYSCLK_GCLK2, "gclk2", gclk2_p, 62),
+
+	/* DDR */
+	JH7110_MUX(JH7110_SYSCLK_DDR_BUS, "ddr_bus", ddr_bus_p),
+	JH7110_GATE(JH7110_SYSCLK_DDR_AXI, "ddr_axi", ddr_axi_p),
+
+	/* CPU cores + debug */
+	JH7110_GATE(JH7110_SYSCLK_CORE, "core", core_p),
+	JH7110_GATE(JH7110_SYSCLK_CORE1, "core1", core_p),
+	JH7110_GATE(JH7110_SYSCLK_CORE2, "core2", core_p),
+	JH7110_GATE(JH7110_SYSCLK_CORE3, "core3", core_p),
+	JH7110_GATE(JH7110_SYSCLK_CORE4, "core4", core_p),
+	JH7110_GATE(JH7110_SYSCLK_DEBUG, "debug", debug_p),
+	JH7110_GATE(JH7110_SYSCLK_TRACE0, "trace0", core_p),
+	JH7110_GATE(JH7110_SYSCLK_TRACE1, "trace1", core_p),
+	JH7110_GATE(JH7110_SYSCLK_TRACE2, "trace2", core_p),
+	JH7110_GATE(JH7110_SYSCLK_TRACE3, "trace3", core_p),
+	JH7110_GATE(JH7110_SYSCLK_TRACE4, "trace4", core_p),
+	JH7110_GATE(JH7110_SYSCLK_TRACE_COM, "trace_com", trace_com_p),
+
+	/* Bus NOC */
+	JH7110_GATE(JH7110_SYSCLK_NOC_BUS_CPU_AXI, "noc_bus_cpu_axi",
+	    cpu_bus_p),
+	JH7110_GATE(JH7110_SYSCLK_NOC_BUS_AXICFG0_AXI, "noc_bus_axicfg0_axi",
+	    axi_cfg0_main_p),
+	JH7110_GATE(JH7110_SYSCLK_AXI_CFG1_MAIN, "axi_cfg1_main",
+	    axi_cfg1_p),
+	JH7110_GATE(JH7110_SYSCLK_AXI_CFG1_AHB, "axi_cfg1_ahb",
+	    axi_cfg1_p),
+	JH7110_GATE(JH7110_SYSCLK_AXI_CFG0_MAIN_DIV, "axi_cfg0_main_div",
+	    axi_cfg0_main_p),
+	JH7110_GATE(JH7110_SYSCLK_AXI_CFG0_MAIN, "axi_cfg0_main",
+	    axi_cfg0_main_p),
+	JH7110_GATE(JH7110_SYSCLK_AXI_CFG0_HIFI4, "axi_cfg0_hifi4",
+	    axi_cfg0_main_p),
+	JH7110_GATE(JH7110_SYSCLK_AXIMEM2_AXI, "aximem2_axi", aximem2_p),
+
+	/* GPU */
+	JH7110_MUX(JH7110_SYSCLK_GPU_ROOT, "gpu_root", gpu_root_p),
+	JH7110_DIV(JH7110_SYSCLK_GPU_CORE, "gpu_core", gpu_core_p, 7),
+	JH7110_GATE(JH7110_SYSCLK_GPU_CORE_CLK, "gpu_core_clk",
+	    gpu_core_clk_p),
+	JH7110_GATE(JH7110_SYSCLK_GPU_SYS_CLK, "gpu_sys_clk",
+	    gpu_sys_clk_p),
+	JH7110_GATE(JH7110_SYSCLK_GPU_APB, "gpu_apb", gpu_apb_p),
+	JH7110_GATEDIV(JH7110_SYSCLK_GPU_RTC_TOGGLE, "gpu_rtc_toggle",
+	    gpu_rtc_p, 12),
+	JH7110_GATE(JH7110_SYSCLK_NOC_BUS_GPU_AXI, "noc_bus_gpu_axi",
+	    noc_gpu_p),
+
+	/* ISP (use GATEDIV for isp_2x instead of MDIV) */
+	JH7110_GATEDIV(JH7110_SYSCLK_ISP_2X, "isp_2x", isp_2x_p, 8),
+	JH7110_DIV(JH7110_SYSCLK_ISP_AXI, "isp_axi", isp_axi_p, 4),
+	JH7110_GATE(JH7110_SYSCLK_ISP_TOP_CORE, "isp_top_core",
+	    isp_top_core_p),
+	JH7110_GATE(JH7110_SYSCLK_ISP_TOP_AXI, "isp_top_axi",
+	    isp_top_axi_p),
+	JH7110_GATE(JH7110_SYSCLK_NOC_BUS_ISP_AXI, "noc_bus_isp_axi",
+	    noc_isp_p),
+
+	/* HiFi4 DSP */
+	JH7110_DIV(JH7110_SYSCLK_HIFI4_CORE, "hifi4_core", hifi4_core_p, 15),
+	JH7110_DIV(JH7110_SYSCLK_HIFI4_AXI, "hifi4_axi", hifi4_axi_p, 2),
+
+	/* VOUT / Display pipeline */
+	JH7110_GATE(JH7110_SYSCLK_VOUT_SRC, "vout_src", vout_src_p),
+	JH7110_DIV(JH7110_SYSCLK_VOUT_AXI, "vout_axi", vout_axi_p, 7),
+	JH7110_GATE(JH7110_SYSCLK_NOC_BUS_DISP_AXI, "noc_bus_disp_axi",
+	    noc_disp_p),
+	JH7110_GATE(JH7110_SYSCLK_VOUT_TOP_AHB, "vout_top_ahb", vout_ahb_p),
+	JH7110_GATE(JH7110_SYSCLK_VOUT_TOP_AXI, "vout_top_axi",
+	    vout_top_axi_p),
+	JH7110_GATE(JH7110_SYSCLK_VOUT_TOP_HDMITX0_MCLK,
+	    "vout_top_hdmitx0_mclk", vout_mclk_p),
+	JH7110_DIV(JH7110_SYSCLK_VOUT_TOP_MIPIPHY_REF,
+	    "vout_top_mipiphy_ref", vout_mipi_p, 2),
+
+	/* JPEG codec */
+	JH7110_DIV(JH7110_SYSCLK_JPEGC_AXI, "jpegc_axi", jpegc_axi_p, 16),
+	JH7110_GATE(JH7110_SYSCLK_CODAJ12_AXI, "codaj12_axi",
+	    codaj12_axi_p),
+	JH7110_GATEDIV(JH7110_SYSCLK_CODAJ12_CORE, "codaj12_core",
+	    codaj12_core_p, 16),
+	JH7110_GATE(JH7110_SYSCLK_CODAJ12_APB, "codaj12_apb",
+	    codaj12_apb_p),
+
+	/* Video decoder */
+	JH7110_DIV(JH7110_SYSCLK_VDEC_AXI, "vdec_axi", vdec_axi_p, 7),
+	JH7110_GATE(JH7110_SYSCLK_WAVE511_AXI, "wave511_axi",
+	    wave511_axi_p),
+	JH7110_GATEDIV(JH7110_SYSCLK_WAVE511_BPU, "wave511_bpu",
+	    wave511_bpu_p, 7),
+	JH7110_GATEDIV(JH7110_SYSCLK_WAVE511_VCE, "wave511_vce",
+	    wave511_vce_p, 7),
+	JH7110_GATE(JH7110_SYSCLK_WAVE511_APB, "wave511_apb",
+	    wave511_apb_p),
+	JH7110_GATE(JH7110_SYSCLK_VDEC_JPG, "vdec_jpg", vdec_jpg_p),
+	JH7110_GATE(JH7110_SYSCLK_VDEC_MAIN, "vdec_main", vdec_main_p),
+	JH7110_GATE(JH7110_SYSCLK_NOC_BUS_VDEC_AXI, "noc_bus_vdec_axi",
+	    noc_vdec_p),
+
+	/* Video encoder */
+	JH7110_DIV(JH7110_SYSCLK_VENC_AXI, "venc_axi", venc_axi_p, 15),
+	JH7110_GATE(JH7110_SYSCLK_WAVE420L_AXI, "wave420l_axi",
+	    wave420l_axi_p),
+	JH7110_GATEDIV(JH7110_SYSCLK_WAVE420L_BPU, "wave420l_bpu",
+	    wave420l_bpu_p, 15),
+	JH7110_GATEDIV(JH7110_SYSCLK_WAVE420L_VCE, "wave420l_vce",
+	    wave420l_vce_p, 15),
+	JH7110_GATE(JH7110_SYSCLK_WAVE420L_APB, "wave420l_apb",
+	    wave420l_apb_p),
+	JH7110_GATE(JH7110_SYSCLK_NOC_BUS_VENC_AXI, "noc_bus_venc_axi",
+	    noc_venc_p),
+
+	/* I2S TX0 (skip MDIV for LRCK) */
+	JH7110_GATE(JH7110_SYSCLK_I2STX0_APB, "i2stx0_apb", i2stx0_apb_p),
+	JH7110_GATEDIV(JH7110_SYSCLK_I2STX0_BCLK_MST, "i2stx0_bclk_mst",
+	    i2stx0_bclk_mst_p, 32),
+	JH7110_INV(JH7110_SYSCLK_I2STX0_BCLK_MST_INV,
+	    "i2stx0_bclk_mst_inv", i2stx0_bclk_mst_p),
+
+	/* I2S TX1 (skip MDIV for LRCK) */
+	JH7110_GATE(JH7110_SYSCLK_I2STX1_APB, "i2stx1_apb", i2stx1_apb_p),
+	JH7110_GATEDIV(JH7110_SYSCLK_I2STX1_BCLK_MST, "i2stx1_bclk_mst",
+	    i2stx1_bclk_mst_p, 32),
+	JH7110_INV(JH7110_SYSCLK_I2STX1_BCLK_MST_INV,
+	    "i2stx1_bclk_mst_inv", i2stx1_bclk_mst_p),
+
+	/* I2S RX (skip MDIV for LRCK) */
+	JH7110_GATE(JH7110_SYSCLK_I2SRX_APB, "i2srx_apb", i2srx_apb_p),
+	JH7110_GATEDIV(JH7110_SYSCLK_I2SRX_BCLK_MST, "i2srx_bclk_mst",
+	    i2srx_bclk_mst_p, 32),
+	JH7110_INV(JH7110_SYSCLK_I2SRX_BCLK_MST_INV,
+	    "i2srx_bclk_mst_inv", i2srx_bclk_mst_p),
+
+	/* PDM */
+	JH7110_GATEDIV(JH7110_SYSCLK_PDM_DMIC, "pdm_dmic", pdm_dmic_p, 64),
 };
 
 static int
