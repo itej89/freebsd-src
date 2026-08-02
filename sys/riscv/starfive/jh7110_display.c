@@ -26,6 +26,8 @@
 #include <dev/ofw/ofw_bus.h>
 #include <dev/ofw/ofw_bus_subr.h>
 
+#include <sys/malloc.h>
+
 #include <dev/clk/clk.h>
 #include <dev/hwreset/hwreset.h>
 
@@ -133,6 +135,96 @@ jh7110_display_init_clocks(device_t dev)
 }
 
 /* ================================================================
+ * Stage B: DC8200 display timing + framebuffer
+ * ================================================================ */
+
+/*
+ * Helper: read-modify-write for DC registers.
+ * dc_set_clear(sc, reg, set_bits, clear_bits)
+ */
+static void
+dc_set_clear(struct jh7110_display_softc *sc, uint32_t reg,
+    uint32_t set, uint32_t clr)
+{
+	uint32_t val;
+
+	val = DC_RD4(sc, reg);
+	val &= ~clr;
+	val |= set;
+	DC_WR4(sc, reg, val);
+}
+
+static int
+jh7110_display_setup_dc(struct jh7110_display_softc *sc)
+{
+	uint32_t width, height, stride;
+
+	width = MODE_720P_HACTIVE;
+	height = MODE_720P_VACTIVE;
+	stride = width * 4;
+	sc->fb_size = stride * height;
+
+	/* Allocate framebuffer memory (physically contiguous) */
+	sc->fb_vaddr = (vm_offset_t)contigmalloc(sc->fb_size, M_DEVBUF,
+	    M_NOWAIT | M_ZERO, 0, ~0UL, PAGE_SIZE, 0);
+	if (sc->fb_vaddr == 0) {
+		device_printf(sc->dev, "failed to allocate framebuffer\n");
+		return (ENOMEM);
+	}
+	sc->fb_paddr = vtophys(sc->fb_vaddr);
+
+	device_printf(sc->dev, "framebuffer %dx%d at phys 0x%lx\n",
+	    width, height, (unsigned long)sc->fb_paddr);
+
+	/* Stop display panel before configuring */
+	dc_set_clear(sc, DC_DISPLAY_PANEL_START, 0, 0x0f);
+
+	/* Set display timing: 720p @ 60Hz */
+	DC_WR4(sc, DC_DISPLAY_H,
+	    MODE_720P_HACTIVE | (MODE_720P_HTOTAL << 16));
+	DC_WR4(sc, DC_DISPLAY_H_SYNC,
+	    MODE_720P_HSYNC_START |
+	    (MODE_720P_HSYNC_END << 15) |
+	    (1 << 30));	/* hsync positive */
+	DC_WR4(sc, DC_DISPLAY_V,
+	    MODE_720P_VACTIVE | (MODE_720P_VTOTAL << 16));
+	DC_WR4(sc, DC_DISPLAY_V_SYNC,
+	    MODE_720P_VSYNC_START |
+	    (MODE_720P_VSYNC_END << 15) |
+	    (1 << 30));	/* vsync positive */
+
+	/* Set background color to blue (visible = working) */
+	DC_WR4(sc, DC_FRAMEBUFFER_BG_COLOR, 0x000040FF);
+
+	/* Configure primary plane (plane 0) */
+	DC_WR4(sc, DC_FRAMEBUFFER_ADDRESS, (uint32_t)sc->fb_paddr);
+	DC_WR4(sc, DC_FRAMEBUFFER_STRIDE, stride);
+	DC_WR4(sc, DC_FRAMEBUFFER_SIZE,
+	    width | (height << 15));
+	DC_WR4(sc, DC_FRAMEBUFFER_TOP_LEFT, 0);
+	DC_WR4(sc, DC_FRAMEBUFFER_BOTTOM_RIGHT,
+	    width | (height << 15));
+
+	/* Enable primary plane: format=XRGB8888(5), enable, display_id=0 */
+	dc_set_clear(sc, DC_FRAMEBUFFER_CONFIG,
+	    (FORMAT_X8R8G8B8 << 26),
+	    (0x1f << 26));
+	dc_set_clear(sc, DC_FRAMEBUFFER_CONFIG_EX,
+	    (1 << 13),		/* enable */
+	    (1 << 13) | (7 << 16) | (1 << 19));
+
+	/* Panel config: enable output */
+	dc_set_clear(sc, DC_DISPLAY_PANEL_CONFIG, (1 << 12), 0);
+
+	/* Start panel 0 */
+	dc_set_clear(sc, DC_DISPLAY_PANEL_START, (1 << 0), (1 << 3));
+
+	device_printf(sc->dev, "display timing set: 720p@60Hz\n");
+
+	return (0);
+}
+
+/* ================================================================
  * Driver entry points
  * ================================================================ */
 
@@ -190,7 +282,12 @@ jh7110_display_attach(device_t dev)
 		return (ENXIO);
 	}
 
-	/* TODO: Stage B - Display timing */
+	/* Stage B: Program display timing and framebuffer */
+	if (jh7110_display_setup_dc(sc) != 0) {
+		device_printf(dev, "failed to setup display\n");
+		return (ENXIO);
+	}
+
 	/* TODO: Stage C - HDMI TX init */
 	/* TODO: Stage D - vt framebuffer registration */
 
