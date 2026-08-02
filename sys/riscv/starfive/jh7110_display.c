@@ -71,6 +71,17 @@
 #define	DC_DISPLAY_DPI_CONFIG	(0x14B8 - DC_REG_BASE)
 #define	DC_DISPLAY_DITHER_CONFIG (0x1410 - DC_REG_BASE)
 #define	DC_DISPLAY_PANEL_CONFIG_EX (0x2518 - DC_REG_BASE)
+#define	DC_FB_U_ADDRESS		(0x1530 - DC_REG_BASE)
+#define	DC_FB_V_ADDRESS		(0x1538 - DC_REG_BASE)
+#define	DC_FB_U_STRIDE		(0x1800 - DC_REG_BASE)
+#define	DC_FB_V_STRIDE		(0x1808 - DC_REG_BASE)
+#define	DC_FB_WATER_MARK	(0x1CE8 - DC_REG_BASE)
+#define	DC_FB_COLOR_KEY		(0x1508 - DC_REG_BASE)
+#define	DC_FB_COLOR_KEY_HIGH	(0x1510 - DC_REG_BASE)
+#define	DC_FB_SRC_GLOBAL_COLOR	(0x2500 - DC_REG_BASE)
+#define	DC_FB_DST_GLOBAL_COLOR	(0x2508 - DC_REG_BASE)
+#define	DC_FB_BLEND_CONFIG	(0x2510 - DC_REG_BASE)
+#define	DC_FB_SCALE_CONFIG	(0x1520 - DC_REG_BASE)
 
 /* DC8200 pixel formats */
 #define	FORMAT_X8R8G8B8		5
@@ -364,12 +375,15 @@ jh7110_display_setup_dc(struct jh7110_display_softc *sc)
 	/* dc_hw_init: set panel config to 0x111 (bits 0,4,8) */
 	DC_WR4(sc, DC_DISPLAY_PANEL_CONFIG, 0x111);
 
-	/* Load RGB-to-RGB identity color matrix (Q14 fixed-point, 16384=1.0) */
-	DC_WR4(sc, DC_FB_RGBTORGB_COEF0, 16384 | (0 << 16));	/* R: 1*R + 0*G */
-	DC_WR4(sc, DC_FB_RGBTORGB_COEF1, 0 | (0 << 16));	/* R: 0*B; G: 0*R */
-	DC_WR4(sc, DC_FB_RGBTORGB_COEF2, 16384 | (0 << 16));	/* G: 1*G + 0*B */
-	DC_WR4(sc, DC_FB_RGBTORGB_COEF3, 0 | (0 << 16));	/* B: 0*R + 0*G */
-	DC_WR4(sc, DC_FB_RGBTORGB_COEF4, 16384);		/* B: 1*B */
+	/* Load RGB-to-RGB color matrix (from Linux dc_hw_init: BT.709 to BT.2020) */
+	DC_WR4(sc, DC_FB_RGBTORGB_COEF0, 10279 | (5395 << 16));
+	DC_WR4(sc, DC_FB_RGBTORGB_COEF1, 709 | (1132 << 16));
+	DC_WR4(sc, DC_FB_RGBTORGB_COEF2, 15065 | (187 << 16));
+	DC_WR4(sc, DC_FB_RGBTORGB_COEF3, 269 | (1442 << 16));
+	DC_WR4(sc, DC_FB_RGBTORGB_COEF4, 14674);
+
+	/* Scale config (from dc_hw_init load_default_filter) */
+	DC_WR4(sc, DC_FB_SCALE_CONFIG, 0x33);
 
 	/* Disable dither */
 	DC_WR4(sc, DC_DISPLAY_DITHER_CONFIG, 0);
@@ -391,8 +405,8 @@ jh7110_display_setup_dc(struct jh7110_display_softc *sc)
 	    (MODE_720P_VSYNC_END << 15) |
 	    (1 << 30));	/* positive vsync: bit 31 clear, bit 30 set */
 
-	/* Set background color to white */
-	DC_WR4(sc, DC_FRAMEBUFFER_BG_COLOR, 0x00FFFFFF);
+	/* Set background color to black */
+	DC_WR4(sc, DC_FRAMEBUFFER_BG_COLOR, 0x00000000);
 
 	/* DPI config: RGB888 = 5 */
 	DC_WR4(sc, DC_DISPLAY_DPI_CONFIG, 5);
@@ -407,22 +421,37 @@ jh7110_display_setup_dc(struct jh7110_display_softc *sc)
 	dc_set_clear(sc, DC_FRAMEBUFFER_CONFIG_EX, 0, (1 << 12));
 	dc_set_clear(sc, DC_DISPLAY_PANEL_CONFIG_EX, (1 << 0), 0);
 
-	/* Configure primary plane (plane 0) */
+	/* Configure primary plane (plane 0) — matches plane_commit() */
 	DC_WR4(sc, DC_FRAMEBUFFER_ADDRESS, (uint32_t)sc->fb_paddr);
+	DC_WR4(sc, DC_FB_U_ADDRESS, 0);
+	DC_WR4(sc, DC_FB_V_ADDRESS, 0);
 	DC_WR4(sc, DC_FRAMEBUFFER_STRIDE, stride);
+	DC_WR4(sc, DC_FB_U_STRIDE, 0);
+	DC_WR4(sc, DC_FB_V_STRIDE, 0);
 	DC_WR4(sc, DC_FRAMEBUFFER_SIZE,
 	    width | (height << 15));
 	DC_WR4(sc, DC_FRAMEBUFFER_TOP_LEFT, 0);
 	DC_WR4(sc, DC_FRAMEBUFFER_BOTTOM_RIGHT,
 	    width | (height << 15));
 
-	/* Enable primary plane: format=XRGB8888(5), enable, display_id=0 */
+	/* Blend config: BLEND_PIXEL_NONE(0x3548), full alpha */
+	DC_WR4(sc, DC_FB_SRC_GLOBAL_COLOR, 0xFF000000);
+	DC_WR4(sc, DC_FB_DST_GLOBAL_COLOR, 0xFF000000);
+	DC_WR4(sc, DC_FB_BLEND_CONFIG, 0x3548);
+	DC_WR4(sc, DC_FB_COLOR_KEY, 0);
+	DC_WR4(sc, DC_FB_COLOR_KEY_HIGH, 0);
+
+	/* Enable primary plane: format=XRGB8888(5), no scale, no rotate */
 	dc_set_clear(sc, DC_FRAMEBUFFER_CONFIG,
 	    (FORMAT_X8R8G8B8 << 26),
-	    (0x1f << 26));
+	    (0x1f << 26) | (1 << 25) | (3 << 23) | (0x1f << 17) |
+	    (7 << 14) | (7 << 11) | (1 << 8) | (1 << 22));
+
+	/* enable=1, zpos=0, display_id=0, RGB2RGB on(bit6), YUV2RGB off(bit8),
+	 * degamma off(bit5) */
 	dc_set_clear(sc, DC_FRAMEBUFFER_CONFIG_EX,
-	    (1 << 13),		/* enable */
-	    (1 << 13) | (7 << 16) | (1 << 19));
+	    (1 << 13) | (1 << 6),
+	    (1 << 13) | (7 << 16) | (1 << 19) | (1 << 8) | (1 << 5) | (1 << 6));
 
 	/* Re-enable shadow registers */
 	dc_set_clear(sc, DC_FRAMEBUFFER_CONFIG_EX, (1 << 12), 0);
