@@ -298,6 +298,10 @@ jh7110_hdmi_init(struct jh7110_display_softc *sc)
 	HDMI_WR(sc, 0xce, 0x01);
 
 	device_printf(sc->dev, "HDMI TX initialized for 720p@60Hz\n");
+	device_printf(sc->dev, "  HDMI reg00=0x%02x reg08=0x%02x regce=0x%02x\n",
+	    HDMI_RD(sc, 0x00), HDMI_RD(sc, 0x08), HDMI_RD(sc, 0xce));
+	device_printf(sc->dev, "  HDMI reg1b2=0x%02x reg1b4=0x%02x reg1be=0x%02x\n",
+	    HDMI_RD(sc, 0x1b2), HDMI_RD(sc, 0x1b4), HDMI_RD(sc, 0x1be));
 
 	return (0);
 }
@@ -412,6 +416,25 @@ jh7110_display_setup_dc(struct jh7110_display_softc *sc)
 
 	device_printf(sc->dev, "display timing set: 720p@60Hz\n");
 
+	/* Register readback for debugging */
+	device_printf(sc->dev, "  PANEL_CONFIG=0x%08x PANEL_START=0x%08x\n",
+	    DC_RD4(sc, DC_DISPLAY_PANEL_CONFIG),
+	    DC_RD4(sc, DC_DISPLAY_PANEL_START));
+	device_printf(sc->dev, "  PANEL_CONFIG_EX=0x%08x\n",
+	    DC_RD4(sc, DC_DISPLAY_PANEL_CONFIG_EX));
+	device_printf(sc->dev, "  FB_CONFIG=0x%08x FB_CONFIG_EX=0x%08x\n",
+	    DC_RD4(sc, DC_FRAMEBUFFER_CONFIG),
+	    DC_RD4(sc, DC_FRAMEBUFFER_CONFIG_EX));
+	device_printf(sc->dev, "  FB_ADDR=0x%08x FB_STRIDE=0x%08x\n",
+	    DC_RD4(sc, DC_FRAMEBUFFER_ADDRESS),
+	    DC_RD4(sc, DC_FRAMEBUFFER_STRIDE));
+	device_printf(sc->dev, "  DISP_H=0x%08x DISP_V=0x%08x\n",
+	    DC_RD4(sc, DC_DISPLAY_H),
+	    DC_RD4(sc, DC_DISPLAY_V));
+	device_printf(sc->dev, "  DP_CONFIG=0x%08x DPI_CONFIG=0x%08x\n",
+	    DC_RD4(sc, DC_DISPLAY_DP_CONFIG),
+	    DC_RD4(sc, DC_DISPLAY_DPI_CONFIG));
+
 	return (0);
 }
 
@@ -479,7 +502,9 @@ jh7110_display_attach(device_t dev)
 		val |= (1 << 3);
 		bus_write_4(sc->dss_res, 0x08, val);
 
-		device_printf(dev, "dssctrl mux configured for HDMI\n");
+		device_printf(dev, "dssctrl mux: reg4=0x%08x reg8=0x%08x\n",
+		    bus_read_4(sc->dss_res, 0x04),
+		    bus_read_4(sc->dss_res, 0x08));
 	} else {
 		device_printf(dev, "warning: could not map dssctrl\n");
 	}
