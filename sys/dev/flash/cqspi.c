@@ -448,20 +448,42 @@ cqspi_write(device_t dev, device_t child, struct bio *bp,
 	reg |= DEVRD_INST_WIDTH_SINGLE;
 	WRITE4(sc, CQSPI_DEVRD, reg);
 
-	WRITE4(sc, CQSPI_INDWR, INDRD_START);
-
 	if (sc->xdma_tx != NULL) {
 		xdma_enqueue_bio(sc->xchan_tx, &bp,
 		    sc->sram_phys, 4, 4, XDMA_MEM_TO_DEV);
 		xdma_queue_submit(sc->xchan_tx);
 		sc->write_op_done = 0;
+		WRITE4(sc, CQSPI_INDWR, INDRD_START);
 		while (sc->write_op_done == 0)
 			tsleep(&sc->xdma_tx, PCATCH | PZERO, "spi", hz/2);
 	} else {
-		/* PIO write: copy data to SRAM window */
-		bus_write_region_1(sc->res[1], 0, (uint8_t *)data, count);
-		while ((READ4(sc, CQSPI_INDWR) & INDRD_START) != 0)
+		/* PIO write */
+		uint8_t *src = (uint8_t *)data;
+		uint32_t wr_remaining = count;
+		uint32_t wr_bytes, temp;
+		int timeout;
+
+		WRITE4(sc, CQSPI_INDWR, INDRD_START);
+
+		while (wr_remaining > 0) {
+			wr_bytes = wr_remaining > 4 ? 4 : wr_remaining;
+			if (wr_bytes == 4) {
+				memcpy(&temp, src, 4);
+				bus_write_4(sc->res[1], 0, temp);
+			} else {
+				temp = 0xffffffff;
+				memcpy(&temp, src, wr_bytes);
+				bus_write_4(sc->res[1], 0, temp);
+			}
+			src += wr_bytes;
+			wr_remaining -= wr_bytes;
+		}
+
+		timeout = 10000;
+		while (!(READ4(sc, CQSPI_INDWR) &
+		    INDRD_IND_OPS_DONE_STATUS) && --timeout > 0)
 			DELAY(10);
+		WRITE4(sc, CQSPI_INDWR, INDRD_IND_OPS_DONE_STATUS);
 	}
 
 	cqspi_wait_idle(sc);
@@ -505,20 +527,63 @@ cqspi_read(device_t dev, device_t child, struct bio *bp,
 	WRITE4(sc, CQSPI_MODEBIT, 0xff);
 	WRITE4(sc, CQSPI_IRQMASK, 0);
 
-	WRITE4(sc, CQSPI_INDRD, INDRD_START);
-
 	if (sc->xdma_rx != NULL) {
 		xdma_enqueue_bio(sc->xchan_rx, &bp, sc->sram_phys, 4, 4,
 		    XDMA_DEV_TO_MEM);
 		xdma_queue_submit(sc->xchan_rx);
 		sc->read_op_done = 0;
+		WRITE4(sc, CQSPI_INDRD, INDRD_START);
 		while (sc->read_op_done == 0)
 			tsleep(&sc->xdma_rx, PCATCH | PZERO, "spi", hz/2);
 	} else {
-		/* PIO read: wait for completion, then copy from SRAM */
-		while ((READ4(sc, CQSPI_INDRD) & INDRD_START) != 0)
+		/* PIO read: poll SRAM fill level, read word-by-word */
+		uint8_t *dst = (uint8_t *)data;
+		uint32_t rd_remaining = count;
+		uint32_t sram_level, rd_bytes, temp;
+		int timeout;
+
+		WRITE4(sc, CQSPI_IRQSTAT, ~0U);
+		WRITE4(sc, CQSPI_INDRD, INDRD_START);
+
+		while (rd_remaining > 0) {
+			/* Wait for SRAM to have data */
+			timeout = 100000;
+			do {
+				sram_level = READ4(sc, CQSPI_SRAMFILL) &
+				    0xffff;
+				if (sram_level > 0)
+					break;
+				DELAY(1);
+			} while (--timeout > 0);
+			if (timeout == 0)
+				break;
+
+			/* Read available words from SRAM */
+			rd_bytes = sram_level * sc->fifo_width;
+			if (rd_bytes > rd_remaining)
+				rd_bytes = rd_remaining;
+
+			while (rd_bytes >= 4) {
+				temp = bus_read_4(sc->res[1], 0);
+				memcpy(dst, &temp, 4);
+				dst += 4;
+				rd_bytes -= 4;
+				rd_remaining -= 4;
+			}
+			if (rd_bytes > 0 && rd_remaining > 0) {
+				temp = bus_read_4(sc->res[1], 0);
+				memcpy(dst, &temp, rd_bytes);
+				dst += rd_bytes;
+				rd_remaining -= rd_bytes;
+			}
+		}
+
+		/* Wait for indirect op done */
+		timeout = 10000;
+		while (!(READ4(sc, CQSPI_INDRD) &
+		    INDRD_IND_OPS_DONE_STATUS) && --timeout > 0)
 			DELAY(10);
-		bus_read_region_1(sc->res[1], 0, (uint8_t *)data, count);
+		WRITE4(sc, CQSPI_INDRD, INDRD_IND_OPS_DONE_STATUS);
 	}
 
 	cqspi_wait_idle(sc);
