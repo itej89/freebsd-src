@@ -50,15 +50,10 @@ static const char *vout_top_ahb_p[] = { "vout_top_ahb" };
 static const char *vout_top_axi_p[] = { "vout_top_axi" };
 static const char *vout_top_hdmitx0_mclk_p[] = { "vout_top_hdmitx0_mclk" };
 static const char *i2stx0_bclk_p[] = { "i2stx0_bclk" };
-static const char *hdmitx0_pixelclk_p[] = { "hdmitx0_pixelclk" };
-
 /* Internal parent references */
 static const char *vout_apb_p[] = { "vout_apb" };
-static const char *dc8200_pix_p[] = { "vout_dc8200_pix" };
 static const char *dsi_sys_p[] = { "vout_dsi_sys" };
 static const char *tx_esc_p[] = { "vout_tx_esc" };
-static const char *dc8200_pix0_p[] = { "vout_dc8200_pix0" };
-static const char *dc8200_pix1_p[] = { "vout_dc8200_pix1" };
 
 /* MUX parents */
 static const char *pix0_mux_p[] = { "vout_dc8200_pix", "hdmitx0_pixelclk" };
