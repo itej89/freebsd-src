@@ -464,10 +464,10 @@ jh7110_display_setup_dc(struct jh7110_display_softc *sc)
 	    (0x1f << 26) | (1 << 25) | (3 << 23) | (0x1f << 17) |
 	    (7 << 14) | (7 << 11) | (1 << 8) | (1 << 22));
 
-	/* enable=1, zpos=0, display_id=0, RGB2RGB on(bit6), YUV2RGB off(bit8),
-	 * degamma off(bit5) */
+	/* enable=1, zpos=0, display_id=0, RGB2RGB off(bit6), YUV2RGB off(bit8),
+	 * degamma off(bit5) — no color space conversion for console fb */
 	dc_set_clear(sc, DC_FRAMEBUFFER_CONFIG_EX,
-	    (1 << 13) | (1 << 6),
+	    (1 << 13),
 	    (1 << 13) | (7 << 16) | (1 << 19) | (1 << 8) | (1 << 5) | (1 << 6));
 
 	/* Re-enable shadow registers */
