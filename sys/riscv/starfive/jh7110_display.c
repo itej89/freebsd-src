@@ -369,7 +369,24 @@ jh7110_display_setup_dc(struct jh7110_display_softc *sc)
 	}
 	sc->fb_paddr = vtophys(sc->fb_vaddr);
 
-	device_printf(sc->dev, "framebuffer %dx%d at phys 0x%lx\n",
+	/* Fill with test pattern: top third red, middle green, bottom blue */
+	{
+		uint32_t *fb = (uint32_t *)sc->fb_vaddr;
+		uint32_t x, y;
+		for (y = 0; y < height; y++) {
+			uint32_t color;
+			if (y < height / 3)
+				color = 0x00FF0000;	/* red */
+			else if (y < 2 * height / 3)
+				color = 0x0000FF00;	/* green */
+			else
+				color = 0x000000FF;	/* blue */
+			for (x = 0; x < width; x++)
+				fb[y * width + x] = color;
+		}
+	}
+
+	device_printf(sc->dev, "framebuffer %dx%d at phys 0x%lx (test pattern)\n",
 	    width, height, (unsigned long)sc->fb_paddr);
 
 	/* dc_hw_init: set panel config to 0x111 (bits 0,4,8) */
