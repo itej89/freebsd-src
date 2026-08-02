@@ -138,7 +138,8 @@ static int n25q_getattr(struct bio *bp);
 static void n25q_task(void *arg);
 
 static struct n25q_flash_ident flash_devices[] = {
-	{ "n25q00", 0x20, 0xbb21, (64 * 1024), 2048, FL_ENABLE_4B_ADDR},
+	{ "n25q00",    0x20, 0xbb21, (64 * 1024), 2048, FL_ENABLE_4B_ADDR },
+	{ "gd25lq128", 0xc8, 0x6018, (64 * 1024), 256, 0 },
 };
 
 static int
