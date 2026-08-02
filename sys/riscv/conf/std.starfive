@@ -11,7 +11,7 @@ device		axp15060	# X-Powers AXP15060 PMIC
 device		spibus		# SPI bus framework
 device		pl022_spi	# ARM PL022 SPI controller
 device		cqspi		# Cadence QSPI NOR flash controller
-device		mx25l		# SPI NOR flash (jedec,spi-nor)
+device		n25q		# SPI NOR flash (jedec,spi-nor via qspi_if)
 
 device		eqos
 

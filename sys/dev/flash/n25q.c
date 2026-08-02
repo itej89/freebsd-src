@@ -125,6 +125,7 @@ struct n25q_softc {
 
 static struct ofw_compat_data compat_data[] = {
 	{ "n25q00aa",		1 },
+	{ "jedec,spi-nor",	1 },
 	{ NULL,			0 },
 };
 
