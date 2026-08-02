@@ -364,12 +364,12 @@ jh7110_display_setup_dc(struct jh7110_display_softc *sc)
 	/* dc_hw_init: set panel config to 0x111 (bits 0,4,8) */
 	DC_WR4(sc, DC_DISPLAY_PANEL_CONFIG, 0x111);
 
-	/* Load RGB-to-RGB identity color matrix (from Linux dc_hw_init) */
-	DC_WR4(sc, DC_FB_RGBTORGB_COEF0, 10279 | (5395 << 16));
-	DC_WR4(sc, DC_FB_RGBTORGB_COEF1, 709 | (1132 << 16));
-	DC_WR4(sc, DC_FB_RGBTORGB_COEF2, 15065 | (187 << 16));
-	DC_WR4(sc, DC_FB_RGBTORGB_COEF3, 269 | (1442 << 16));
-	DC_WR4(sc, DC_FB_RGBTORGB_COEF4, 14674);
+	/* Load RGB-to-RGB identity color matrix (Q14 fixed-point, 16384=1.0) */
+	DC_WR4(sc, DC_FB_RGBTORGB_COEF0, 16384 | (0 << 16));	/* R: 1*R + 0*G */
+	DC_WR4(sc, DC_FB_RGBTORGB_COEF1, 0 | (0 << 16));	/* R: 0*B; G: 0*R */
+	DC_WR4(sc, DC_FB_RGBTORGB_COEF2, 16384 | (0 << 16));	/* G: 1*G + 0*B */
+	DC_WR4(sc, DC_FB_RGBTORGB_COEF3, 0 | (0 << 16));	/* B: 0*R + 0*G */
+	DC_WR4(sc, DC_FB_RGBTORGB_COEF4, 16384);		/* B: 1*B */
 
 	/* Disable dither */
 	DC_WR4(sc, DC_DISPLAY_DITHER_CONFIG, 0);
