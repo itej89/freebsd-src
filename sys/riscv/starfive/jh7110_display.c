@@ -26,7 +26,6 @@
 #include <dev/ofw/ofw_bus.h>
 #include <dev/ofw/ofw_bus_subr.h>
 
-#include <sys/callout.h>
 #include <sys/malloc.h>
 
 #include <dev/clk/clk.h>
@@ -122,13 +121,8 @@ struct jh7110_display_softc {
 	int			dss_rid;
 	struct fb_info		fb_info;
 	vm_paddr_t		fb_paddr;
-	vm_offset_t		fb_vaddr;	/* uncacheable HW framebuffer */
-	vm_offset_t		fb_shadow;	/* cached shadow buffer (vt writes here) */
-	vm_offset_t		fb_prev;	/* cached prev copy for dirty detection */
+	vm_offset_t		fb_vaddr;
 	uint32_t		fb_size;
-	uint32_t		fb_stride;
-	uint32_t		fb_height;
-	struct callout		fb_callout;
 };
 
 static struct ofw_compat_data compat_data[] = {
@@ -143,53 +137,6 @@ static struct ofw_compat_data compat_data[] = {
 /* ================================================================
  * Stage A: Clock and Reset initialization
  * ================================================================ */
-
-static void
-jh7110_fb_flush(void *arg)
-{
-	struct jh7110_display_softc *sc = arg;
-	uint32_t y, dirty_start, stride;
-	vm_offset_t shadow, hw, prev;
-	int in_dirty;
-
-	shadow = sc->fb_shadow;
-	hw = sc->fb_vaddr;
-	prev = sc->fb_prev;
-	stride = sc->fb_stride;
-	in_dirty = 0;
-	dirty_start = 0;
-
-	for (y = 0; y <= sc->fb_height; y++) {
-		int dirty = 0;
-
-		if (y < sc->fb_height) {
-			uint32_t off = y * stride;
-			const uint64_t *s = (const uint64_t *)(shadow + off);
-			const uint64_t *p = (const uint64_t *)(prev + off);
-			uint32_t i, cnt = stride / 8;
-
-			for (i = 0; i < cnt; i++) {
-				if (s[i] != p[i]) {
-					dirty = 1;
-					break;
-				}
-			}
-		}
-
-		if (dirty && !in_dirty) {
-			dirty_start = y;
-			in_dirty = 1;
-		} else if (!dirty && in_dirty) {
-			uint32_t off = dirty_start * stride;
-			uint32_t len = (y - dirty_start) * stride;
-
-			memcpy((void *)(hw + off), (void *)(shadow + off), len);
-			memcpy((void *)(prev + off), (void *)(shadow + off), len);
-			in_dirty = 0;
-		}
-	}
-	callout_reset(&sc->fb_callout, hz / 120, jh7110_fb_flush, sc);
-}
 
 static int
 jh7110_display_init_clocks(device_t dev)
@@ -417,7 +364,8 @@ jh7110_display_setup_dc(struct jh7110_display_softc *sc)
 	stride = width * 4;
 	sc->fb_size = stride * height;
 
-	/* Allocate HW framebuffer (uncacheable for DC8200 DMA) */
+	/* Allocate framebuffer (uncacheable — vt(4) writes directly, its
+	 * built-in character-cell dedup avoids redundant pixel writes) */
 	{
 		void *tmp;
 
@@ -432,18 +380,6 @@ jh7110_display_setup_dc(struct jh7110_display_softc *sc)
 	sc->fb_vaddr = (vm_offset_t)pmap_mapdev_attr(sc->fb_paddr,
 	    sc->fb_size, VM_MEMATTR_UNCACHEABLE);
 	memset((void *)sc->fb_vaddr, 0, sc->fb_size);
-
-	/* Allocate cached shadow + prev buffers for dirty-line tracking */
-	sc->fb_shadow = (vm_offset_t)malloc(sc->fb_size, M_DEVBUF,
-	    M_NOWAIT | M_ZERO);
-	sc->fb_prev = (vm_offset_t)malloc(sc->fb_size, M_DEVBUF,
-	    M_NOWAIT | M_ZERO);
-	if (sc->fb_shadow == 0 || sc->fb_prev == 0) {
-		device_printf(sc->dev, "failed to allocate shadow buffers\n");
-		return (ENOMEM);
-	}
-	sc->fb_stride = stride;
-	sc->fb_height = height;
 
 	device_printf(sc->dev, "framebuffer %dx%d at phys 0x%lx\n",
 	    width, height, (unsigned long)sc->fb_paddr);
@@ -467,7 +403,7 @@ jh7110_display_setup_dc(struct jh7110_display_softc *sc)
 	/* Stop panel 0 before configuring */
 	dc_set_clear(sc, DC_DISPLAY_PANEL_START, 0, (1 << 0) | (1 << 2));
 
-	/* Set display timing: 720p @ 60Hz */
+	/* Set display timing: 640x480 @ 60Hz */
 	DC_WR4(sc, DC_DISPLAY_H,
 	    MODE_HACTIVE | (MODE_HTOTAL << 16));
 	DC_WR4(sc, DC_DISPLAY_H_SYNC,
@@ -634,27 +570,23 @@ jh7110_display_attach(device_t dev)
 	if (jh7110_hdmi_init(sc) != 0)
 		device_printf(dev, "HDMI init failed (display may not work)\n");
 
-	/* Stage D: Register with vt(4) using the cached shadow buffer */
+	/* Stage D: Register with vt(4) — direct uncacheable HW buffer */
 	sc->fb_info.fb_name = device_get_nameunit(dev);
-	sc->fb_info.fb_vbase = sc->fb_shadow;
-	sc->fb_info.fb_pbase = 0;
+	sc->fb_info.fb_vbase = sc->fb_vaddr;
+	sc->fb_info.fb_pbase = sc->fb_paddr;
 	sc->fb_info.fb_width = MODE_HACTIVE;
 	sc->fb_info.fb_height = MODE_VACTIVE;
 	sc->fb_info.fb_depth = 32;
 	sc->fb_info.fb_bpp = 32;
 	sc->fb_info.fb_stride = MODE_HACTIVE * 4;
 	sc->fb_info.fb_size = sc->fb_size;
-	sc->fb_info.fb_flags = FB_FLAG_NOMMAP;
+	sc->fb_info.fb_flags = FB_FLAG_MEMATTR;
+	sc->fb_info.fb_memattr = VM_MEMATTR_UNCACHEABLE;
 
-	if (vt_fb_attach(&sc->fb_info) != 0) {
+	if (vt_fb_attach(&sc->fb_info) != 0)
 		device_printf(dev, "vt_fb_attach failed\n");
-	} else {
+	else
 		device_printf(dev, "vt(4) console registered\n");
-
-		/* Start shadow→hw framebuffer copy at 30fps */
-		callout_init(&sc->fb_callout, 1);
-		callout_reset(&sc->fb_callout, hz / 120, jh7110_fb_flush, sc);
-	}
 
 	return (0);
 }
