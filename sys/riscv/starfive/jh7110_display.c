@@ -57,6 +57,7 @@
 #define	DC_DISPLAY_DP_CONFIG	0x1CD0
 #define	DC_DISPLAY_DPI_CONFIG	0x14B8
 #define	DC_DISPLAY_DITHER_CONFIG 0x1410
+#define	DC_DISPLAY_PANEL_CONFIG_EX 0x2518
 
 /* DC8200 pixel formats */
 #define	FORMAT_X8R8G8B8		5
@@ -378,6 +379,10 @@ jh7110_display_setup_dc(struct jh7110_display_softc *sc)
 	/* Clear YUV mode in panel config (bit 16) */
 	dc_set_clear(sc, DC_DISPLAY_PANEL_CONFIG, 0, (1 << 16));
 
+	/* Disable shadow registers so plane writes take effect immediately */
+	dc_set_clear(sc, DC_FRAMEBUFFER_CONFIG_EX, 0, (1 << 12));
+	dc_set_clear(sc, DC_DISPLAY_PANEL_CONFIG_EX, (1 << 0), 0);
+
 	/* Configure primary plane (plane 0) */
 	DC_WR4(sc, DC_FRAMEBUFFER_ADDRESS, (uint32_t)sc->fb_paddr);
 	DC_WR4(sc, DC_FRAMEBUFFER_STRIDE, stride);
@@ -394,6 +399,10 @@ jh7110_display_setup_dc(struct jh7110_display_softc *sc)
 	dc_set_clear(sc, DC_FRAMEBUFFER_CONFIG_EX,
 	    (1 << 13),		/* enable */
 	    (1 << 13) | (7 << 16) | (1 << 19));
+
+	/* Re-enable shadow registers */
+	dc_set_clear(sc, DC_FRAMEBUFFER_CONFIG_EX, (1 << 12), 0);
+	dc_set_clear(sc, DC_DISPLAY_PANEL_CONFIG_EX, 0, (1 << 0));
 
 	/* Panel config: enable output (bit 12) */
 	dc_set_clear(sc, DC_DISPLAY_PANEL_CONFIG, (1 << 12), 0);
