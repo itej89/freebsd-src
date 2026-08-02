@@ -46,6 +46,7 @@
 
 static struct ofw_compat_data compat_data[] = {
 	{ "dummy-codec",	1},
+	{ "linux,spdif-dit",	1},
 	{ NULL,			0 }
 };
 

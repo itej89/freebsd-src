@@ -15,6 +15,8 @@ device		n25q		# SPI NOR flash (via qspi_if)
 
 device		eqos
 
+device		sound		# PCM audio framework
+
 # MMC/SD/SDIO Card slot support
 device		dwmmc
 device		dwmmc_starfive

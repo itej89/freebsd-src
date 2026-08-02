@@ -112,7 +112,7 @@ static const char *i2c_apb_p[] = { "apb_bus" };
 static const char *uart45_apb_p[] = { "apb0" };
 static const char *uart45_core_p[] = { "perh_root" };
 static const char *pwmdac_apb_p[] = { "apb_bus" };
-static const char *pwmdac_core_p[] = { "apb_bus" };
+static const char *pwmdac_core_p[] = { "audio_root" };
 static const char *spdif_apb_p[] = { "apb_bus" };
 static const char *spdif_core_p[] = { "apb_bus" };
 static const char *tdm_ahb_p[] = { "ahb0" };
@@ -339,7 +339,7 @@ static const struct jh7110_clk_def sys_clks[] = {
 
 	/* Audio: PWMDAC, SPDIF (157-160) */
 	JH7110_GATE(JH7110_SYSCLK_PWMDAC_APB, "pwmdac_apb", pwmdac_apb_p),
-	JH7110_GATE(JH7110_SYSCLK_PWMDAC_CORE, "pwmdac_core", pwmdac_core_p),
+	JH7110_GATEDIV(JH7110_SYSCLK_PWMDAC_CORE, "pwmdac_core", pwmdac_core_p, 256),
 	JH7110_GATE(JH7110_SYSCLK_SPDIF_APB, "spdif_apb", spdif_apb_p),
 	JH7110_GATE(JH7110_SYSCLK_SPDIF_CORE, "spdif_core", spdif_core_p),
 
