@@ -114,7 +114,7 @@ static struct ofw_compat_data compat_data[] = {
 static int
 jh7110_display_init_clocks(device_t dev)
 {
-	clk_t clk;
+	clk_t clk, pix_clk, hdmi_pix_clk;
 	hwreset_t rst;
 	int i;
 
@@ -131,6 +131,15 @@ jh7110_display_init_clocks(device_t dev)
 			device_printf(dev, "failed to deassert reset %d\n", i);
 	}
 	device_printf(dev, "deasserted %d resets\n", i);
+
+	/* Set pixel clock mux to use HDMI TX pixel clock */
+	if (clk_get_by_ofw_name(dev, 0, "pix_clk", &pix_clk) == 0 &&
+	    clk_get_by_ofw_name(dev, 0, "hdmitx0_pixelclk", &hdmi_pix_clk) == 0) {
+		if (clk_set_parent_by_clk(pix_clk, hdmi_pix_clk) == 0)
+			device_printf(dev, "pixel clock mux set to hdmitx0_pixelclk\n");
+		else
+			device_printf(dev, "failed to set pixel clock parent\n");
+	}
 
 	DELAY(100000);
 
