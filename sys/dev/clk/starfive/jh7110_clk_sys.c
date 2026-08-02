@@ -90,11 +90,6 @@ static const char *gmac1_rx_p[] = { "gmac1_rgmii_rxin", "gmac1_rmii_rtx" };
 static const char *gmac1_rx_inv_p[] = { "gmac1_rx" };
 
 /* parents for additional SYS clocks (IDs 102+) */
-static const char *ahb1_p[] = { "stg_axiahb" };
-static const char *qspi_ahb_p[] = { "ahb1" };
-static const char *qspi_apb_p[] = { "apb_bus" };
-static const char *qspi_ref_src_p[] = { "pll0_out" };
-static const char *qspi_ref_p[] = { "osc", "qspi_ref_src" };
 static const char *can_apb_p[] = { "apb_bus" };
 static const char *can_timer_p[] = { "osc" };
 static const char *can_can_p[] = { "perh_root" };
@@ -155,7 +150,6 @@ static const struct jh7110_clk_def sys_clks[] = {
 	JH7110_GATE(JH7110_SYSCLK_NOC_BUS_STG_AXI, "noc_bus_stg_axi",
 	    noc_bus_stg_axi_p),
 	JH7110_GATE(JH7110_SYSCLK_AHB0, "ahb0", ahb0_p),
-	JH7110_GATE(JH7110_SYSCLK_AHB1, "ahb1", ahb0_p),
 	JH7110_DIV(JH7110_SYSCLK_APB_BUS, "apb_bus", apb_bus_p, 8),
 
 	JH7110_GATE(JH7110_SYSCLK_SDIO0_AHB, "u0_dw_sdio_clk_ahb",
