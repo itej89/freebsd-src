@@ -98,16 +98,16 @@
 #define	HDMI_TIMING_VS		0xA4
 #define	HDMI_TIMING_VACT	0xA8
 
-/* 720p@60Hz timing */
-#define	MODE_720P_HACTIVE	1280
-#define	MODE_720P_HTOTAL	1650
-#define	MODE_720P_HSYNC_START	1390
-#define	MODE_720P_HSYNC_END	1430
-#define	MODE_720P_VACTIVE	720
-#define	MODE_720P_VTOTAL	750
-#define	MODE_720P_VSYNC_START	725
-#define	MODE_720P_VSYNC_END	730
-#define	MODE_720P_PIXCLK	74250000
+/* 640x480@60Hz (VGA) timing — small fb for fast uncacheable writes */
+#define	MODE_HACTIVE		640
+#define	MODE_HTOTAL		800
+#define	MODE_HSYNC_START	656
+#define	MODE_HSYNC_END		752
+#define	MODE_VACTIVE		480
+#define	MODE_VTOTAL		525
+#define	MODE_VSYNC_START	490
+#define	MODE_VSYNC_END		492
+#define	MODE_PIXCLK		25175000
 
 struct jh7110_display_softc {
 	device_t		dev;
@@ -181,24 +181,24 @@ jh7110_display_init_clocks(device_t dev)
 #define	HDMI_WR(sc, off, v)	bus_write_4((sc)->hdmi_res, (off) * 4, (v))
 #define	HDMI_RD(sc, off)	bus_read_4((sc)->hdmi_res, (off) * 4)
 
-/* Pre-PLL config for 74.25 MHz (720p@60Hz) from Linux table */
+/* Pre-PLL config for 25.175 MHz (640x480@60Hz) from Linux table */
 static const struct {
 	uint8_t prediv, fbdiv_hi, fbdiv_lo;
 	uint8_t tmds_div_a, tmds_div_b, tmds_div_c;
 	uint8_t pclk_div_a, pclk_div_b, pclk_div_c, pclk_div_d;
 	uint32_t fracdiv;
-} hdmi_pre_pll_74250 = {
-	.prediv = 1, .fbdiv_hi = 0, .fbdiv_lo = 99,
-	.tmds_div_a = 1, .tmds_div_b = 2, .tmds_div_c = 2,
-	.pclk_div_a = 1, .pclk_div_b = 2, .pclk_div_c = 3, .pclk_div_d = 4,
-	.fracdiv = 0,
+} hdmi_pre_pll = {
+	.prediv = 1, .fbdiv_hi = 0, .fbdiv_lo = 100,
+	.tmds_div_a = 2, .tmds_div_b = 3, .tmds_div_c = 3,
+	.pclk_div_a = 12, .pclk_div_b = 3, .pclk_div_c = 3, .pclk_div_d = 4,
+	.fracdiv = 0xF55555,
 };
 
-/* Post-PLL config for 74.25 MHz */
+/* Post-PLL config for 25.175 MHz */
 static const struct {
 	uint8_t prediv, fbdiv, postdiv, post_div_en;
-} hdmi_post_pll_74250 = {
-	.prediv = 1, .fbdiv = 20, .postdiv = 1, .post_div_en = 3,
+} hdmi_post_pll = {
+	.prediv = 1, .fbdiv = 80, .postdiv = 13, .post_div_en = 3,
 };
 
 static int
@@ -240,26 +240,34 @@ jh7110_hdmi_init(struct jh7110_display_softc *sc)
 	/* PHY power down */
 	HDMI_WR(sc, 0x00, 0x63);
 
-	/* Configure PLL for 74.25 MHz (720p) */
+	/* Configure PLL for 25.175 MHz (640x480) */
 	HDMI_WR(sc, 0x1a0, 0x01);
 	HDMI_WR(sc, 0x1aa, 0x0f);
-	HDMI_WR(sc, 0x1a1, hdmi_pre_pll_74250.prediv);
-	HDMI_WR(sc, 0x1a2, 0xf0 | (hdmi_pre_pll_74250.fbdiv_lo >> 8));
-	HDMI_WR(sc, 0x1a3, hdmi_pre_pll_74250.fbdiv_lo & 0xff);
+	HDMI_WR(sc, 0x1a1, hdmi_pre_pll.prediv);
+	HDMI_WR(sc, 0x1a2, 0xf0 | (hdmi_pre_pll.fbdiv_lo >> 8));
+	HDMI_WR(sc, 0x1a3, hdmi_pre_pll.fbdiv_lo & 0xff);
 	HDMI_WR(sc, 0x1a4,
-	    (hdmi_pre_pll_74250.tmds_div_a << 4) |
-	    (hdmi_pre_pll_74250.tmds_div_b << 2) |
-	    hdmi_pre_pll_74250.tmds_div_c);
+	    (hdmi_pre_pll.tmds_div_a << 4) |
+	    (hdmi_pre_pll.tmds_div_b << 2) |
+	    hdmi_pre_pll.tmds_div_c);
 	HDMI_WR(sc, 0x1a5,
-	    (hdmi_pre_pll_74250.pclk_div_b << 5) |
-	    hdmi_pre_pll_74250.pclk_div_a);
+	    (hdmi_pre_pll.pclk_div_b << 5) |
+	    hdmi_pre_pll.pclk_div_a);
 	HDMI_WR(sc, 0x1a6,
-	    (hdmi_pre_pll_74250.pclk_div_c << 5) |
-	    hdmi_pre_pll_74250.pclk_div_d);
-	HDMI_WR(sc, 0x1ab, hdmi_post_pll_74250.prediv);
-	HDMI_WR(sc, 0x1ac, hdmi_post_pll_74250.fbdiv);
-	HDMI_WR(sc, 0x1ad, hdmi_post_pll_74250.postdiv);
+	    (hdmi_pre_pll.pclk_div_c << 5) |
+	    hdmi_pre_pll.pclk_div_d);
+	HDMI_WR(sc, 0x1ab, hdmi_post_pll.prediv);
+	HDMI_WR(sc, 0x1ac, hdmi_post_pll.fbdiv);
+	HDMI_WR(sc, 0x1ad, hdmi_post_pll.postdiv);
 	HDMI_WR(sc, 0x1aa, 0x0e);
+
+	/* Fractional divider (non-zero for 25.175 MHz) */
+	if (hdmi_pre_pll.fracdiv) {
+		HDMI_WR(sc, 0x1a2, 0xc0 | (hdmi_pre_pll.fbdiv_lo >> 8));
+		HDMI_WR(sc, 0x1d3, hdmi_pre_pll.fracdiv & 0xff);
+		HDMI_WR(sc, 0x1d2, (hdmi_pre_pll.fracdiv >> 8) & 0xff);
+		HDMI_WR(sc, 0x1d1, (hdmi_pre_pll.fracdiv >> 16) & 0xff);
+	}
 	HDMI_WR(sc, 0x1a0, 0x00);
 
 	/* Wait for PLL lock (non-fatal on timeout) */
@@ -286,30 +294,30 @@ jh7110_hdmi_init(struct jh7110_display_softc *sc)
 	/* Turn on serializer */
 	HDMI_WR(sc, 0x1be, 0x71);
 
-	/* Eye diagram improvement for 720p (VIC 4) */
+	/* Eye diagram improvement for 640x480 (VIC 1) */
 	HDMI_WR(sc, 0x1bf, 0x00);
 	HDMI_WR(sc, 0x1c0, 0x00);
 
 	/* PHY power down before timing config */
 	HDMI_WR(sc, 0x00, 0x63);
 
-	/* Configure video timing for 720p */
-	HDMI_WR(sc, 0x09, MODE_720P_HTOTAL & 0xff);
-	HDMI_WR(sc, 0x0a, (MODE_720P_HTOTAL >> 8) & 0xff);
-	HDMI_WR(sc, 0x0b, (MODE_720P_HTOTAL - MODE_720P_HACTIVE) & 0xff);
-	HDMI_WR(sc, 0x0c, ((MODE_720P_HTOTAL - MODE_720P_HACTIVE) >> 8) & 0xff);
-	HDMI_WR(sc, 0x0d, (MODE_720P_HTOTAL - MODE_720P_HSYNC_START) & 0xff);
-	HDMI_WR(sc, 0x0e, ((MODE_720P_HTOTAL - MODE_720P_HSYNC_START) >> 8) & 0xff);
-	HDMI_WR(sc, 0x0f, (MODE_720P_HSYNC_END - MODE_720P_HSYNC_START) & 0xff);
-	HDMI_WR(sc, 0x10, ((MODE_720P_HSYNC_END - MODE_720P_HSYNC_START) >> 8) & 0xff);
-	HDMI_WR(sc, 0x11, MODE_720P_VTOTAL & 0xff);
-	HDMI_WR(sc, 0x12, (MODE_720P_VTOTAL >> 8) & 0xff);
-	HDMI_WR(sc, 0x13, MODE_720P_VTOTAL - MODE_720P_VACTIVE);
-	HDMI_WR(sc, 0x14, MODE_720P_VTOTAL - MODE_720P_VSYNC_START);
-	HDMI_WR(sc, 0x15, MODE_720P_VSYNC_END - MODE_720P_VSYNC_START);
+	/* Configure video timing for 640x480 */
+	HDMI_WR(sc, 0x09, MODE_HTOTAL & 0xff);
+	HDMI_WR(sc, 0x0a, (MODE_HTOTAL >> 8) & 0xff);
+	HDMI_WR(sc, 0x0b, (MODE_HTOTAL - MODE_HACTIVE) & 0xff);
+	HDMI_WR(sc, 0x0c, ((MODE_HTOTAL - MODE_HACTIVE) >> 8) & 0xff);
+	HDMI_WR(sc, 0x0d, (MODE_HTOTAL - MODE_HSYNC_START) & 0xff);
+	HDMI_WR(sc, 0x0e, ((MODE_HTOTAL - MODE_HSYNC_START) >> 8) & 0xff);
+	HDMI_WR(sc, 0x0f, (MODE_HSYNC_END - MODE_HSYNC_START) & 0xff);
+	HDMI_WR(sc, 0x10, ((MODE_HSYNC_END - MODE_HSYNC_START) >> 8) & 0xff);
+	HDMI_WR(sc, 0x11, MODE_VTOTAL & 0xff);
+	HDMI_WR(sc, 0x12, (MODE_VTOTAL >> 8) & 0xff);
+	HDMI_WR(sc, 0x13, MODE_VTOTAL - MODE_VACTIVE);
+	HDMI_WR(sc, 0x14, MODE_VTOTAL - MODE_VSYNC_START);
+	HDMI_WR(sc, 0x15, MODE_VSYNC_END - MODE_VSYNC_START);
 
-	/* External video timing, hsync+vsync positive */
-	HDMI_WR(sc, 0x08, (1 << 0) | (1 << 2) | (1 << 3));
+	/* External video timing, hsync+vsync negative (640x480) */
+	HDMI_WR(sc, 0x08, (1 << 0));
 
 	/* PHY power on */
 	HDMI_WR(sc, 0x00, 0x61);
@@ -321,7 +329,7 @@ jh7110_hdmi_init(struct jh7110_display_softc *sc)
 	HDMI_WR(sc, 0xce, 0x00);
 	HDMI_WR(sc, 0xce, 0x01);
 
-	device_printf(sc->dev, "HDMI TX initialized for 720p@60Hz\n");
+	device_printf(sc->dev, "HDMI TX initialized for 640x480@60Hz\n");
 
 	return (0);
 }
@@ -351,19 +359,26 @@ jh7110_display_setup_dc(struct jh7110_display_softc *sc)
 {
 	uint32_t width, height, stride;
 
-	width = MODE_720P_HACTIVE;
-	height = MODE_720P_VACTIVE;
+	width = MODE_HACTIVE;
+	height = MODE_VACTIVE;
 	stride = width * 4;
 	sc->fb_size = stride * height;
 
-	/* Allocate framebuffer memory (physically contiguous) */
-	sc->fb_vaddr = (vm_offset_t)contigmalloc(sc->fb_size, M_DEVBUF,
-	    M_NOWAIT | M_ZERO, 0, ~0UL, PAGE_SIZE, 0);
-	if (sc->fb_vaddr == 0) {
-		device_printf(sc->dev, "failed to allocate framebuffer\n");
-		return (ENOMEM);
+	/* Allocate framebuffer (physically contiguous, mapped uncacheable) */
+	{
+		void *tmp;
+
+		tmp = contigmalloc(sc->fb_size, M_DEVBUF,
+		    M_NOWAIT | M_ZERO, 0, ~0UL, PAGE_SIZE, 0);
+		if (tmp == NULL) {
+			device_printf(sc->dev, "failed to allocate framebuffer\n");
+			return (ENOMEM);
+		}
+		sc->fb_paddr = vtophys(tmp);
 	}
-	sc->fb_paddr = vtophys(sc->fb_vaddr);
+	sc->fb_vaddr = (vm_offset_t)pmap_mapdev_attr(sc->fb_paddr,
+	    sc->fb_size, VM_MEMATTR_UNCACHEABLE);
+	memset((void *)sc->fb_vaddr, 0, sc->fb_size);
 
 	device_printf(sc->dev, "framebuffer %dx%d at phys 0x%lx\n",
 	    width, height, (unsigned long)sc->fb_paddr);
@@ -389,17 +404,17 @@ jh7110_display_setup_dc(struct jh7110_display_softc *sc)
 
 	/* Set display timing: 720p @ 60Hz */
 	DC_WR4(sc, DC_DISPLAY_H,
-	    MODE_720P_HACTIVE | (MODE_720P_HTOTAL << 16));
+	    MODE_HACTIVE | (MODE_HTOTAL << 16));
 	DC_WR4(sc, DC_DISPLAY_H_SYNC,
-	    MODE_720P_HSYNC_START |
-	    (MODE_720P_HSYNC_END << 15) |
-	    (1 << 30));	/* positive hsync: bit 31 clear, bit 30 set */
+	    MODE_HSYNC_START |
+	    (MODE_HSYNC_END << 15) |
+	    (1 << 31) | (1 << 30));	/* negative hsync */
 	DC_WR4(sc, DC_DISPLAY_V,
-	    MODE_720P_VACTIVE | (MODE_720P_VTOTAL << 16));
+	    MODE_VACTIVE | (MODE_VTOTAL << 16));
 	DC_WR4(sc, DC_DISPLAY_V_SYNC,
-	    MODE_720P_VSYNC_START |
-	    (MODE_720P_VSYNC_END << 15) |
-	    (1 << 30));	/* positive vsync: bit 31 clear, bit 30 set */
+	    MODE_VSYNC_START |
+	    (MODE_VSYNC_END << 15) |
+	    (1 << 31) | (1 << 30));	/* negative vsync */
 
 	/* Set background color to black */
 	DC_WR4(sc, DC_FRAMEBUFFER_BG_COLOR, 0x00000000);
@@ -459,7 +474,7 @@ jh7110_display_setup_dc(struct jh7110_display_softc *sc)
 	/* Start panel 0 */
 	dc_set_clear(sc, DC_DISPLAY_PANEL_START, (1 << 0), (1 << 3));
 
-	device_printf(sc->dev, "display timing set: 720p@60Hz\n");
+	device_printf(sc->dev, "display timing set: 640x480@60Hz\n");
 
 	return (0);
 }
@@ -558,12 +573,14 @@ jh7110_display_attach(device_t dev)
 	sc->fb_info.fb_name = device_get_nameunit(dev);
 	sc->fb_info.fb_vbase = sc->fb_vaddr;
 	sc->fb_info.fb_pbase = sc->fb_paddr;
-	sc->fb_info.fb_width = MODE_720P_HACTIVE;
-	sc->fb_info.fb_height = MODE_720P_VACTIVE;
+	sc->fb_info.fb_width = MODE_HACTIVE;
+	sc->fb_info.fb_height = MODE_VACTIVE;
 	sc->fb_info.fb_depth = 32;
 	sc->fb_info.fb_bpp = 32;
-	sc->fb_info.fb_stride = MODE_720P_HACTIVE * 4;
+	sc->fb_info.fb_stride = MODE_HACTIVE * 4;
 	sc->fb_info.fb_size = sc->fb_size;
+	sc->fb_info.fb_flags = FB_FLAG_MEMATTR;
+	sc->fb_info.fb_memattr = VM_MEMATTR_UNCACHEABLE;
 
 	if (vt_fb_attach(&sc->fb_info) != 0)
 		device_printf(dev, "vt_fb_attach failed\n");
