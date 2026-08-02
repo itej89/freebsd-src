@@ -8,6 +8,8 @@ device		ig4iic		# DesignWare I2C controller (FDT)
 device		iicbus		# I2C bus framework
 device		iic		# /dev/iic* userspace interface
 device		axp15060	# X-Powers AXP15060 PMIC
+device		spibus		# SPI bus framework
+device		pl022_spi	# ARM PL022 SPI controller
 
 device		eqos
 

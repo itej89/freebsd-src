@@ -8,6 +8,8 @@ dev/ichiic/ig4_fdt.c			optional	ig4iic fdt
 
 dev/iicbus/pmic/axp15060.c		optional	axp15060
 
+dev/spibus/controller/pl022/pl022_spi.c	optional	pl022_spi fdt
+
 dev/mmc/host/dwmmc_starfive.c		optional	dwmmc_starfive fdt
 
 dev/eqos/if_eqos.c			optional	eqos
