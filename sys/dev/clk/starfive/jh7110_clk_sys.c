@@ -90,6 +90,11 @@ static const char *gmac1_rx_p[] = { "gmac1_rgmii_rxin", "gmac1_rmii_rtx" };
 static const char *gmac1_rx_inv_p[] = { "gmac1_rx" };
 
 /* parents for additional SYS clocks (IDs 102+) */
+static const char *ahb1_p[] = { "stg_axiahb" };
+static const char *qspi_ahb_p[] = { "ahb1" };
+static const char *qspi_apb_p[] = { "apb_bus" };
+static const char *qspi_ref_src_p[] = { "pll0_out" };
+static const char *qspi_ref_p[] = { "osc", "qspi_ref_src" };
 static const char *can_apb_p[] = { "apb_bus" };
 static const char *can_timer_p[] = { "osc" };
 static const char *can_can_p[] = { "perh_root" };
@@ -182,7 +187,17 @@ static const struct jh7110_clk_def sys_clks[] = {
 	JH7110_DIV(JH7110_SYSCLK_GMAC1_RMII_RTX, "gmac1_rmii_rtx",
 	    gmac1_rmii_rtx_p, 30),
 
-	/* GMAC0 (102-111) — some already handled above */
+	/* AHB1 bus */
+	JH7110_GATE(JH7110_SYSCLK_AHB1, "ahb1", ahb1_p),
+
+	/* QSPI (102-106) */
+	JH7110_GATE(JH7110_SYSCLK_QSPI_AHB, "qspi_ahb", qspi_ahb_p),
+	JH7110_GATE(JH7110_SYSCLK_QSPI_APB, "qspi_apb", qspi_apb_p),
+	JH7110_DIV(JH7110_SYSCLK_QSPI_REF_SRC, "qspi_ref_src",
+	    qspi_ref_src_p, 16),
+	JH7110_GATEMUX(JH7110_SYSCLK_QSPI_REF, "qspi_ref", qspi_ref_p),
+
+	/* Misc (112-114) */
 	JH7110_GATE(JH7110_SYSCLK_IOMUX_APB, "iomux_apb", u0_sys_iomux_apb_p),
 	JH7110_GATE(JH7110_SYSCLK_MAILBOX_APB, "mailbox_apb", apb_bus_p),
 	JH7110_GATE(JH7110_SYSCLK_INT_CTRL_APB, "int_ctrl_apb", apb_bus_p),
