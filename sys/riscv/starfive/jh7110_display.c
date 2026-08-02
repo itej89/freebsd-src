@@ -135,6 +135,143 @@ jh7110_display_init_clocks(device_t dev)
 }
 
 /* ================================================================
+ * Stage C: Innosilicon HDMI TX
+ * ================================================================ */
+
+/* HDMI registers are at offset * 4 (each logical register is 32-bit spaced) */
+#define	HDMI_WR(sc, off, v)	bus_write_4((sc)->hdmi_res, (off) * 4, (v))
+#define	HDMI_RD(sc, off)	bus_read_4((sc)->hdmi_res, (off) * 4)
+
+/* Pre-PLL config for 74.25 MHz (720p@60Hz) from Linux table */
+static const struct {
+	uint8_t prediv, fbdiv_hi, fbdiv_lo;
+	uint8_t tmds_div_a, tmds_div_b, tmds_div_c;
+	uint8_t pclk_div_a, pclk_div_b, pclk_div_c, pclk_div_d;
+	uint32_t fracdiv;
+} hdmi_pre_pll_74250 = {
+	.prediv = 1, .fbdiv_hi = 0, .fbdiv_lo = 99,
+	.tmds_div_a = 1, .tmds_div_b = 2, .tmds_div_c = 2,
+	.pclk_div_a = 1, .pclk_div_b = 2, .pclk_div_c = 3, .pclk_div_d = 4,
+	.fracdiv = 0,
+};
+
+/* Post-PLL config for 74.25 MHz */
+static const struct {
+	uint8_t prediv, fbdiv, postdiv, post_div_en;
+} hdmi_post_pll_74250 = {
+	.prediv = 1, .fbdiv = 20, .postdiv = 1, .post_div_en = 3,
+};
+
+static int
+jh7110_hdmi_init(struct jh7110_display_softc *sc)
+{
+	phandle_t node;
+	hwreset_t rst;
+	int timeout;
+
+	/* Map HDMI registers at fixed address */
+	sc->hdmi_rid = 2;
+	sc->hdmi_res = bus_alloc_resource(sc->dev, SYS_RES_MEMORY,
+	    &sc->hdmi_rid, 0x29590000, 0x29593FFF, 0x4000, RF_ACTIVE);
+	if (sc->hdmi_res == NULL) {
+		device_printf(sc->dev, "could not map HDMI registers\n");
+		return (ENXIO);
+	}
+
+	/*
+	 * HDMI clocks come from VOUT clock domain (already powered on).
+	 * They were enabled as part of DC8200 clock init since the DTS
+	 * references VOUT clocks directly. HDMI TX reset needs to be
+	 * deasserted — find it from the HDMI DTS node.
+	 */
+	node = OF_finddevice("/soc/hdmi@29590000");
+	if (node > 0) {
+		if (hwreset_get_by_ofw_idx(sc->dev, node, 0, &rst) == 0)
+			hwreset_deassert(rst);
+	}
+
+	DELAY(50000);
+
+	/* PHY power down */
+	HDMI_WR(sc, 0x00, 0x63);
+
+	/* Configure PLL for 74.25 MHz (720p) */
+	HDMI_WR(sc, 0x1a0, 0x01);
+	HDMI_WR(sc, 0x1aa, 0x0f);
+	HDMI_WR(sc, 0x1a1, hdmi_pre_pll_74250.prediv);
+	HDMI_WR(sc, 0x1a2, 0xf0 | (hdmi_pre_pll_74250.fbdiv_lo >> 8));
+	HDMI_WR(sc, 0x1a3, hdmi_pre_pll_74250.fbdiv_lo & 0xff);
+	HDMI_WR(sc, 0x1a4,
+	    (hdmi_pre_pll_74250.tmds_div_a << 4) |
+	    (hdmi_pre_pll_74250.tmds_div_b << 2) |
+	    hdmi_pre_pll_74250.tmds_div_c);
+	HDMI_WR(sc, 0x1a5,
+	    (hdmi_pre_pll_74250.pclk_div_b << 5) |
+	    hdmi_pre_pll_74250.pclk_div_a);
+	HDMI_WR(sc, 0x1a6,
+	    (hdmi_pre_pll_74250.pclk_div_c << 5) |
+	    hdmi_pre_pll_74250.pclk_div_d);
+	HDMI_WR(sc, 0x1ab, hdmi_post_pll_74250.prediv);
+	HDMI_WR(sc, 0x1ac, hdmi_post_pll_74250.fbdiv);
+	HDMI_WR(sc, 0x1ad, hdmi_post_pll_74250.postdiv);
+	HDMI_WR(sc, 0x1aa, 0x0e);
+	HDMI_WR(sc, 0x1a0, 0x00);
+
+	/* Wait for PLL lock */
+	timeout = 100000;
+	while (!(HDMI_RD(sc, 0x1a9) & 0x1) && --timeout > 0)
+		DELAY(1);
+	if (timeout == 0)
+		device_printf(sc->dev, "HDMI pre-PLL lock timeout\n");
+
+	timeout = 100000;
+	while (!(HDMI_RD(sc, 0x1af) & 0x1) && --timeout > 0)
+		DELAY(1);
+	if (timeout == 0)
+		device_printf(sc->dev, "HDMI post-PLL lock timeout\n");
+
+	/* Turn on LDO */
+	HDMI_WR(sc, 0x1b4, 0x07);
+	/* Turn on serializer */
+	HDMI_WR(sc, 0x1be, 0x71);
+
+	/* PHY power down before timing config */
+	HDMI_WR(sc, 0x00, 0x63);
+
+	/* Configure video timing for 720p */
+	HDMI_WR(sc, 0x09, MODE_720P_HTOTAL & 0xff);
+	HDMI_WR(sc, 0x0a, (MODE_720P_HTOTAL >> 8) & 0xff);
+	HDMI_WR(sc, 0x0b, (MODE_720P_HTOTAL - MODE_720P_HACTIVE) & 0xff);
+	HDMI_WR(sc, 0x0c, ((MODE_720P_HTOTAL - MODE_720P_HACTIVE) >> 8) & 0xff);
+	HDMI_WR(sc, 0x0d, (MODE_720P_HTOTAL - MODE_720P_HSYNC_START) & 0xff);
+	HDMI_WR(sc, 0x0e, ((MODE_720P_HTOTAL - MODE_720P_HSYNC_START) >> 8) & 0xff);
+	HDMI_WR(sc, 0x0f, (MODE_720P_HSYNC_END - MODE_720P_HSYNC_START) & 0xff);
+	HDMI_WR(sc, 0x10, ((MODE_720P_HSYNC_END - MODE_720P_HSYNC_START) >> 8) & 0xff);
+	HDMI_WR(sc, 0x11, MODE_720P_VTOTAL & 0xff);
+	HDMI_WR(sc, 0x12, (MODE_720P_VTOTAL >> 8) & 0xff);
+	HDMI_WR(sc, 0x13, MODE_720P_VTOTAL - MODE_720P_VACTIVE);
+	HDMI_WR(sc, 0x14, MODE_720P_VTOTAL - MODE_720P_VSYNC_START);
+	HDMI_WR(sc, 0x15, MODE_720P_VSYNC_END - MODE_720P_VSYNC_START);
+
+	/* External video timing, hsync+vsync positive */
+	HDMI_WR(sc, 0x08, (1 << 0) | (1 << 2) | (1 << 3));
+
+	/* PHY power on */
+	HDMI_WR(sc, 0x00, 0x61);
+
+	/* TMDS driver on */
+	HDMI_WR(sc, 0x1b2, 0x8f);
+
+	/* Toggle HDMI output */
+	HDMI_WR(sc, 0xce, 0x00);
+	HDMI_WR(sc, 0xce, 0x01);
+
+	device_printf(sc->dev, "HDMI TX initialized for 720p@60Hz\n");
+
+	return (0);
+}
+
+/* ================================================================
  * Stage B: DC8200 display timing + framebuffer
  * ================================================================ */
 
@@ -288,7 +425,10 @@ jh7110_display_attach(device_t dev)
 		return (ENXIO);
 	}
 
-	/* TODO: Stage C - HDMI TX init */
+	/* Stage C: Initialize HDMI TX */
+	if (jh7110_hdmi_init(sc) != 0)
+		device_printf(dev, "HDMI init failed (display may not work)\n");
+
 	/* TODO: Stage D - vt framebuffer registration */
 
 	return (0);
