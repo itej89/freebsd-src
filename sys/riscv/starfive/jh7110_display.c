@@ -63,6 +63,11 @@
 #define	DC_FRAMEBUFFER_BOTTOM_RIGHT	(0x24E0 - DC_REG_BASE)
 #define	DC_FRAMEBUFFER_BG_COLOR	(0x1528 - DC_REG_BASE)
 #define	DC_DISPLAY_DP_CONFIG	(0x1CD0 - DC_REG_BASE)
+#define	DC_FB_RGBTORGB_COEF0	(0x1E20 - DC_REG_BASE)
+#define	DC_FB_RGBTORGB_COEF1	(0x1E28 - DC_REG_BASE)
+#define	DC_FB_RGBTORGB_COEF2	(0x1E30 - DC_REG_BASE)
+#define	DC_FB_RGBTORGB_COEF3	(0x1E38 - DC_REG_BASE)
+#define	DC_FB_RGBTORGB_COEF4	(0x1E40 - DC_REG_BASE)
 #define	DC_DISPLAY_DPI_CONFIG	(0x14B8 - DC_REG_BASE)
 #define	DC_DISPLAY_DITHER_CONFIG (0x1410 - DC_REG_BASE)
 #define	DC_DISPLAY_PANEL_CONFIG_EX (0x2518 - DC_REG_BASE)
@@ -359,6 +364,13 @@ jh7110_display_setup_dc(struct jh7110_display_softc *sc)
 	/* dc_hw_init: set panel config to 0x111 (bits 0,4,8) */
 	DC_WR4(sc, DC_DISPLAY_PANEL_CONFIG, 0x111);
 
+	/* Load RGB-to-RGB identity color matrix (from Linux dc_hw_init) */
+	DC_WR4(sc, DC_FB_RGBTORGB_COEF0, 10279 | (5395 << 16));
+	DC_WR4(sc, DC_FB_RGBTORGB_COEF1, 709 | (1132 << 16));
+	DC_WR4(sc, DC_FB_RGBTORGB_COEF2, 15065 | (187 << 16));
+	DC_WR4(sc, DC_FB_RGBTORGB_COEF3, 269 | (1442 << 16));
+	DC_WR4(sc, DC_FB_RGBTORGB_COEF4, 14674);
+
 	/* Disable dither */
 	DC_WR4(sc, DC_DISPLAY_DITHER_CONFIG, 0);
 
@@ -379,8 +391,8 @@ jh7110_display_setup_dc(struct jh7110_display_softc *sc)
 	    (MODE_720P_VSYNC_END << 15) |
 	    (1 << 30));	/* positive vsync: bit 31 clear, bit 30 set */
 
-	/* Set background color to blue (visible = working) */
-	DC_WR4(sc, DC_FRAMEBUFFER_BG_COLOR, 0x000040FF);
+	/* Set background color to white */
+	DC_WR4(sc, DC_FRAMEBUFFER_BG_COLOR, 0x00FFFFFF);
 
 	/* DPI config: RGB888 = 5 */
 	DC_WR4(sc, DC_DISPLAY_DPI_CONFIG, 5);
