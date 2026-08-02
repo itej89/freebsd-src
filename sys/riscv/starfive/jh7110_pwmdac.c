@@ -202,9 +202,9 @@ jh7110_pwmdac_dai_intr(device_t dev, struct snd_dbuf *play_buf,
 	if (count < 4)
 		goto out;
 
-	size = sndbuf_getblksz(play_buf) * sndbuf_getblkcnt(play_buf);
+	size = play_buf->bufsize;
 	readyptr = sndbuf_getreadyptr(play_buf);
-	samples = (uint8_t *)sndbuf_getbuf(play_buf);
+	samples = play_buf->buf;
 
 	written = 0;
 	while (count >= 4 && written < 256) {
