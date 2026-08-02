@@ -13,6 +13,7 @@
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/bus.h>
+#include <sys/callout.h>
 #include <sys/kernel.h>
 #include <sys/lock.h>
 #include <sys/module.h>
@@ -67,6 +68,10 @@ struct jh7110_pwmdac_softc {
 	clk_t			clk_core;
 	uint32_t		play_ptr;
 	uint32_t		speed;
+	driver_intr_t		*intr_handler;
+	void			*intr_arg;
+	struct callout		intr_callout;
+	int			running;
 };
 
 #define	PWMDAC_LOCK(sc)		mtx_lock(&(sc)->mtx)
@@ -171,11 +176,16 @@ jh7110_pwmdac_dai_trigger(device_t dev, int go, int pcm_dir)
 	switch (go) {
 	case PCMTRIG_START:
 		sc->play_ptr = 0;
+		sc->running = 1;
 		PWMDAC_WR(sc, PWMDAC_CTRL, ctrl | CTRL_ENABLE);
+		callout_reset(&sc->intr_callout, 1,
+		    jh7110_pwmdac_callout, sc);
 		break;
 	case PCMTRIG_STOP:
 	case PCMTRIG_ABORT:
+		sc->running = 0;
 		PWMDAC_WR(sc, PWMDAC_CTRL, ctrl & ~CTRL_ENABLE);
+		callout_stop(&sc->intr_callout);
 		break;
 	}
 	PWMDAC_UNLOCK(sc);
@@ -250,10 +260,29 @@ jh7110_pwmdac_dai_get_ptr(device_t dev, int pcm_dir)
 	return (ptr);
 }
 
+static void
+jh7110_pwmdac_callout(void *arg)
+{
+	struct jh7110_pwmdac_softc *sc = arg;
+
+	if (sc->intr_handler != NULL)
+		sc->intr_handler(sc->intr_arg);
+
+	if (sc->running)
+		callout_reset(&sc->intr_callout, 1, jh7110_pwmdac_callout, sc);
+}
+
 static int
 jh7110_pwmdac_dai_setup_intr(device_t dev, driver_intr_t intr_handler,
     void *intr_arg)
 {
+	struct jh7110_pwmdac_softc *sc;
+
+	sc = device_get_softc(dev);
+	sc->intr_handler = intr_handler;
+	sc->intr_arg = intr_arg;
+
+	callout_init(&sc->intr_callout, 1);
 
 	return (0);
 }
