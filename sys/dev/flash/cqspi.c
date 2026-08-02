@@ -61,6 +61,8 @@
 #include <dev/flash/cqspi.h>
 #include <dev/flash/mx25lreg.h>
 #include <dev/xdma/xdma.h>
+#include <dev/clk/clk.h>
+#include <dev/hwreset/hwreset.h>
 
 #include "qspi_if.h"
 
@@ -665,6 +667,18 @@ cqspi_attach(device_t dev)
 	if (bus_alloc_resources(dev, cqspi_spec, sc->res)) {
 		device_printf(dev, "could not allocate resources\n");
 		return (ENXIO);
+	}
+
+	/* Enable clocks and deassert resets */
+	{
+		clk_t clk;
+		hwreset_t rst;
+		int i;
+
+		for (i = 0; clk_get_by_ofw_index(dev, 0, i, &clk) == 0; i++)
+			clk_enable(clk);
+		for (i = 0; hwreset_get_by_ofw_idx(dev, 0, i, &rst) == 0; i++)
+			hwreset_deassert(rst);
 	}
 
 	/* Memory interface */
