@@ -44,22 +44,14 @@
 	sound {
 		compatible = "simple-audio-card";
 		simple-audio-card,name = "StarFive-PWMDAC-Sound-Card";
-		#address-cells = <1>;
-		#size-cells = <0>;
+		simple-audio-card,format = "left_j";
 
-		simple-audio-card,dai-link@0 {
-			reg = <0>;
-			format = "left_j";
-			bitclock-master = <&sndcpu0>;
-			frame-master = <&sndcpu0>;
+		simple-audio-card,cpu {
+			sound-dai = <&pwmdac>;
+		};
 
-			sndcpu0: cpu {
-				sound-dai = <&pwmdac>;
-			};
-
-			codec {
-				sound-dai = <&pwmdac_codec>;
-			};
+		simple-audio-card,codec {
+			sound-dai = <&pwmdac_codec>;
 		};
 	};
 };
