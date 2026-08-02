@@ -66,6 +66,24 @@
 /* Shutdown: write bit 7 of PWR_DISABLE_DOWN_SEQ (0x32) */
 #define	AXP15060_POWEROFF		(1 << 7)
 
+/* IRQ1 status/enable bits */
+#define	AXP15060_IRQ1_TEMP_HI_LV1	(1 << 0)
+#define	AXP15060_IRQ1_TEMP_HI_LV2	(1 << 1)
+#define	AXP15060_IRQ1_DCDC1_LOW		(1 << 2)
+#define	AXP15060_IRQ1_DCDC2_LOW		(1 << 3)
+#define	AXP15060_IRQ1_DCDC3_LOW		(1 << 4)
+#define	AXP15060_IRQ1_DCDC4_LOW		(1 << 5)
+#define	AXP15060_IRQ1_DCDC5_LOW		(1 << 6)
+#define	AXP15060_IRQ1_DCDC6_LOW		(1 << 7)
+
+/* IRQ2 status/enable bits */
+#define	AXP15060_IRQ2_PEK_LONG		(1 << 0)
+#define	AXP15060_IRQ2_PEK_SHORT		(1 << 1)
+#define	AXP15060_IRQ2_GPIO1_INPUT	(1 << 2)
+#define	AXP15060_IRQ2_PEK_FAL_EDGE	(1 << 3)
+#define	AXP15060_IRQ2_PEK_RIS_EDGE	(1 << 4)
+#define	AXP15060_IRQ2_GPIO2_INPUT	(1 << 5)
+
 /* PWR_OUT_CTRL1 bits (DCDC enables) */
 #define	AXP15060_DCDC1_EN		(1 << 0)
 #define	AXP15060_DCDC2_EN		(1 << 1)

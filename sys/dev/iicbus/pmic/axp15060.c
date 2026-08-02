@@ -23,6 +23,7 @@
 #include <sys/mutex.h>
 #include <sys/reboot.h>
 #include <sys/rman.h>
+#include <sys/sysctl.h>
 
 #include <machine/bus.h>
 
@@ -497,6 +498,46 @@ axp15060_regdev_map(device_t dev, phandle_t xref, int ncells, pcell_t *cells,
 }
 
 /* ================================================================
+ * IRQ polling + Power key handler
+ * ================================================================ */
+
+/*
+ * Sysctl handler to read and clear PMIC IRQ status.
+ * Returns bitmask of pending events and clears them.
+ */
+static int
+axp15060_sysctl_irq1(SYSCTL_HANDLER_ARGS)
+{
+	device_t dev = arg1;
+	uint8_t val;
+	int irq, error;
+
+	if (axp15060_read(dev, AXP15060_IRQ1_STATE, &val) != 0)
+		return (EIO);
+	irq = val;
+	if (val != 0)
+		axp15060_write(dev, AXP15060_IRQ1_STATE, val);
+	error = sysctl_handle_int(oidp, &irq, 0, req);
+	return (error);
+}
+
+static int
+axp15060_sysctl_irq2(SYSCTL_HANDLER_ARGS)
+{
+	device_t dev = arg1;
+	uint8_t val;
+	int irq, error;
+
+	if (axp15060_read(dev, AXP15060_IRQ2_STATE, &val) != 0)
+		return (EIO);
+	irq = val;
+	if (val != 0)
+		axp15060_write(dev, AXP15060_IRQ2_STATE, val);
+	error = sysctl_handle_int(oidp, &irq, 0, req);
+	return (error);
+}
+
+/* ================================================================
  * Shutdown handler
  * ================================================================ */
 
@@ -625,6 +666,34 @@ axp15060_attach(device_t dev)
 
 	EVENTHANDLER_REGISTER(shutdown_final, axp15060_shutdown, dev,
 	    SHUTDOWN_PRI_LAST);
+
+	/* Enable PMIC IRQs: temp, undervoltage, power key */
+	axp15060_write(dev, AXP15060_IRQ1_EN,
+	    AXP15060_IRQ1_TEMP_HI_LV1 | AXP15060_IRQ1_TEMP_HI_LV2 |
+	    AXP15060_IRQ1_DCDC1_LOW | AXP15060_IRQ1_DCDC2_LOW |
+	    AXP15060_IRQ1_DCDC3_LOW | AXP15060_IRQ1_DCDC4_LOW |
+	    AXP15060_IRQ1_DCDC5_LOW | AXP15060_IRQ1_DCDC6_LOW);
+	axp15060_write(dev, AXP15060_IRQ2_EN,
+	    AXP15060_IRQ2_PEK_SHORT | AXP15060_IRQ2_PEK_LONG |
+	    AXP15060_IRQ2_PEK_FAL_EDGE | AXP15060_IRQ2_PEK_RIS_EDGE);
+
+	/* Clear any pending IRQs */
+	axp15060_write(dev, AXP15060_IRQ1_STATE, 0xff);
+	axp15060_write(dev, AXP15060_IRQ2_STATE, 0xff);
+
+	/* Export IRQ status via sysctl */
+	SYSCTL_ADD_PROC(device_get_sysctl_ctx(dev),
+	    SYSCTL_CHILDREN(device_get_sysctl_tree(dev)),
+	    OID_AUTO, "irq1_status",
+	    CTLTYPE_INT | CTLFLAG_RD | CTLFLAG_NEEDGIANT,
+	    dev, 0, axp15060_sysctl_irq1, "I",
+	    "IRQ1: temp/undervoltage (read clears)");
+	SYSCTL_ADD_PROC(device_get_sysctl_ctx(dev),
+	    SYSCTL_CHILDREN(device_get_sysctl_tree(dev)),
+	    OID_AUTO, "irq2_status",
+	    CTLTYPE_INT | CTLFLAG_RD | CTLFLAG_NEEDGIANT,
+	    dev, 0, axp15060_sysctl_irq2, "I",
+	    "IRQ2: power key events (read clears)");
 
 	return (0);
 }
