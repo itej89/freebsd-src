@@ -322,10 +322,6 @@ jh7110_hdmi_init(struct jh7110_display_softc *sc)
 	HDMI_WR(sc, 0xce, 0x01);
 
 	device_printf(sc->dev, "HDMI TX initialized for 720p@60Hz\n");
-	device_printf(sc->dev, "  HDMI reg00=0x%02x reg08=0x%02x regce=0x%02x\n",
-	    HDMI_RD(sc, 0x00), HDMI_RD(sc, 0x08), HDMI_RD(sc, 0xce));
-	device_printf(sc->dev, "  HDMI reg1b2=0x%02x reg1b4=0x%02x reg1be=0x%02x\n",
-	    HDMI_RD(sc, 0x1b2), HDMI_RD(sc, 0x1b4), HDMI_RD(sc, 0x1be));
 
 	return (0);
 }
@@ -369,24 +365,7 @@ jh7110_display_setup_dc(struct jh7110_display_softc *sc)
 	}
 	sc->fb_paddr = vtophys(sc->fb_vaddr);
 
-	/* Fill with test pattern: top third red, middle green, bottom blue */
-	{
-		uint32_t *fb = (uint32_t *)sc->fb_vaddr;
-		uint32_t x, y;
-		for (y = 0; y < height; y++) {
-			uint32_t color;
-			if (y < height / 3)
-				color = 0x00FF0000;	/* red */
-			else if (y < 2 * height / 3)
-				color = 0x0000FF00;	/* green */
-			else
-				color = 0x000000FF;	/* blue */
-			for (x = 0; x < width; x++)
-				fb[y * width + x] = color;
-		}
-	}
-
-	device_printf(sc->dev, "framebuffer %dx%d at phys 0x%lx (test pattern)\n",
+	device_printf(sc->dev, "framebuffer %dx%d at phys 0x%lx\n",
 	    width, height, (unsigned long)sc->fb_paddr);
 
 	/* dc_hw_init: set panel config to 0x111 (bits 0,4,8) */
@@ -482,25 +461,6 @@ jh7110_display_setup_dc(struct jh7110_display_softc *sc)
 
 	device_printf(sc->dev, "display timing set: 720p@60Hz\n");
 
-	/* Register readback for debugging */
-	device_printf(sc->dev, "  PANEL_CONFIG=0x%08x PANEL_START=0x%08x\n",
-	    DC_RD4(sc, DC_DISPLAY_PANEL_CONFIG),
-	    DC_RD4(sc, DC_DISPLAY_PANEL_START));
-	device_printf(sc->dev, "  PANEL_CONFIG_EX=0x%08x\n",
-	    DC_RD4(sc, DC_DISPLAY_PANEL_CONFIG_EX));
-	device_printf(sc->dev, "  FB_CONFIG=0x%08x FB_CONFIG_EX=0x%08x\n",
-	    DC_RD4(sc, DC_FRAMEBUFFER_CONFIG),
-	    DC_RD4(sc, DC_FRAMEBUFFER_CONFIG_EX));
-	device_printf(sc->dev, "  FB_ADDR=0x%08x FB_STRIDE=0x%08x\n",
-	    DC_RD4(sc, DC_FRAMEBUFFER_ADDRESS),
-	    DC_RD4(sc, DC_FRAMEBUFFER_STRIDE));
-	device_printf(sc->dev, "  DISP_H=0x%08x DISP_V=0x%08x\n",
-	    DC_RD4(sc, DC_DISPLAY_H),
-	    DC_RD4(sc, DC_DISPLAY_V));
-	device_printf(sc->dev, "  DP_CONFIG=0x%08x DPI_CONFIG=0x%08x\n",
-	    DC_RD4(sc, DC_DISPLAY_DP_CONFIG),
-	    DC_RD4(sc, DC_DISPLAY_DPI_CONFIG));
-
 	return (0);
 }
 
@@ -568,9 +528,7 @@ jh7110_display_attach(device_t dev)
 		val |= (1 << 3);
 		bus_write_4(sc->dss_res, 0x08, val);
 
-		device_printf(dev, "dssctrl mux: reg4=0x%08x reg8=0x%08x\n",
-		    bus_read_4(sc->dss_res, 0x04),
-		    bus_read_4(sc->dss_res, 0x08));
+		device_printf(dev, "dssctrl mux configured for HDMI\n");
 	} else {
 		device_printf(dev, "warning: could not map dssctrl\n");
 	}
@@ -596,7 +554,21 @@ jh7110_display_attach(device_t dev)
 	if (jh7110_hdmi_init(sc) != 0)
 		device_printf(dev, "HDMI init failed (display may not work)\n");
 
-	/* TODO: Stage D - vt framebuffer registration */
+	/* Stage D: Register with vt(4) framebuffer console */
+	sc->fb_info.fb_name = device_get_nameunit(dev);
+	sc->fb_info.fb_vbase = sc->fb_vaddr;
+	sc->fb_info.fb_pbase = sc->fb_paddr;
+	sc->fb_info.fb_width = MODE_720P_HACTIVE;
+	sc->fb_info.fb_height = MODE_720P_VACTIVE;
+	sc->fb_info.fb_depth = 32;
+	sc->fb_info.fb_bpp = 32;
+	sc->fb_info.fb_stride = MODE_720P_HACTIVE * 4;
+	sc->fb_info.fb_size = sc->fb_size;
+
+	if (vt_fb_attach(&sc->fb_info) != 0)
+		device_printf(dev, "vt_fb_attach failed\n");
+	else
+		device_printf(dev, "vt(4) console registered\n");
 
 	return (0);
 }
