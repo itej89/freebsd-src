@@ -89,6 +89,38 @@ static const char *gmac1_tx_p[] = { "gmac1_gtxclk", "gmac1_rmii_rtx" };
 static const char *gmac1_rx_p[] = { "gmac1_rgmii_rxin", "gmac1_rmii_rtx" };
 static const char *gmac1_rx_inv_p[] = { "gmac1_rx" };
 
+/* parents for additional SYS clocks (IDs 102+) */
+static const char *ahb1_p[] = { "stg_axiahb" };
+static const char *qspi_ahb_p[] = { "ahb1" };
+static const char *qspi_apb_p[] = { "apb_bus" };
+static const char *qspi_ref_src_p[] = { "pll0_out" };
+static const char *qspi_ref_p[] = { "osc", "qspi_ref_src" };
+static const char *can_apb_p[] = { "apb_bus" };
+static const char *can_timer_p[] = { "osc" };
+static const char *can_can_p[] = { "perh_root" };
+static const char *pwm_apb_p[] = { "apb_bus" };
+static const char *wdt_apb_p[] = { "apb_bus" };
+static const char *wdt_core_p[] = { "osc" };
+static const char *timer_apb_p[] = { "apb_bus" };
+static const char *timer_p[] = { "osc" };
+static const char *temp_apb_p[] = { "apb_bus" };
+static const char *temp_core_p[] = { "osc" };
+static const char *spi_apb0_p[] = { "apb0" };
+static const char *spi_apb_p[] = { "apb_bus" };
+static const char *i2c_apb0_p[] = { "apb0" };
+static const char *i2c_apb_p[] = { "apb_bus" };
+static const char *uart45_apb_p[] = { "apb0" };
+static const char *uart45_core_p[] = { "perh_root" };
+static const char *pwmdac_apb_p[] = { "apb_bus" };
+static const char *pwmdac_core_p[] = { "apb_bus" };
+static const char *spdif_apb_p[] = { "apb_bus" };
+static const char *spdif_core_p[] = { "apb_bus" };
+static const char *tdm_ahb_p[] = { "ahb0" };
+static const char *tdm_apb_p[] = { "apb_bus" };
+static const char *tdm_internal_p[] = { "apb_bus" };
+static const char *pdm_apb_p[] = { "apb_bus" };
+static const char *jtag_trng_p[] = { "osc" };
+
 /* non-pll SYS clocks */
 static const struct jh7110_clk_def sys_clks[] = {
 	JH7110_MUX(JH7110_SYSCLK_CPU_ROOT, "cpu_root", cpu_root_p),
@@ -123,6 +155,7 @@ static const struct jh7110_clk_def sys_clks[] = {
 	JH7110_GATE(JH7110_SYSCLK_NOC_BUS_STG_AXI, "noc_bus_stg_axi",
 	    noc_bus_stg_axi_p),
 	JH7110_GATE(JH7110_SYSCLK_AHB0, "ahb0", ahb0_p),
+	JH7110_GATE(JH7110_SYSCLK_AHB1, "ahb1", ahb0_p),
 	JH7110_DIV(JH7110_SYSCLK_APB_BUS, "apb_bus", apb_bus_p, 8),
 
 	JH7110_GATE(JH7110_SYSCLK_SDIO0_AHB, "u0_dw_sdio_clk_ahb",
@@ -154,6 +187,73 @@ static const struct jh7110_clk_def sys_clks[] = {
 	JH7110_GATE(JH7110_SYSCLK_GMAC1_GTXC, "gmac1_gtxc", gmac1_gtxc_p),
 	JH7110_DIV(JH7110_SYSCLK_GMAC1_RMII_RTX, "gmac1_rmii_rtx",
 	    gmac1_rmii_rtx_p, 30),
+
+	/* GMAC0 (102-111) — some already handled above */
+	JH7110_GATE(JH7110_SYSCLK_IOMUX_APB, "iomux_apb", u0_sys_iomux_apb_p),
+	JH7110_GATE(JH7110_SYSCLK_MAILBOX_APB, "mailbox_apb", apb_bus_p),
+	JH7110_GATE(JH7110_SYSCLK_INT_CTRL_APB, "int_ctrl_apb", apb_bus_p),
+
+	/* CAN (115-120) */
+	JH7110_GATE(JH7110_SYSCLK_CAN0_APB, "can0_apb", can_apb_p),
+	JH7110_GATEDIV(JH7110_SYSCLK_CAN0_TIMER, "can0_timer", can_timer_p, 24),
+	JH7110_GATEDIV(JH7110_SYSCLK_CAN0_CAN, "can0_can", can_can_p, 63),
+	JH7110_GATE(JH7110_SYSCLK_CAN1_APB, "can1_apb", can_apb_p),
+	JH7110_GATEDIV(JH7110_SYSCLK_CAN1_TIMER, "can1_timer", can_timer_p, 24),
+	JH7110_GATEDIV(JH7110_SYSCLK_CAN1_CAN, "can1_can", can_can_p, 63),
+
+	/* PWM, WDT, Timer (121-128) */
+	JH7110_GATE(JH7110_SYSCLK_PWM_APB, "pwm_apb", pwm_apb_p),
+	JH7110_GATE(JH7110_SYSCLK_WDT_APB, "wdt_apb", wdt_apb_p),
+	JH7110_GATE(JH7110_SYSCLK_WDT_CORE, "wdt_core", wdt_core_p),
+	JH7110_GATE(JH7110_SYSCLK_TIMER_APB, "timer_apb", timer_apb_p),
+	JH7110_GATE(JH7110_SYSCLK_TIMER0, "timer0", timer_p),
+	JH7110_GATE(JH7110_SYSCLK_TIMER1, "timer1", timer_p),
+	JH7110_GATE(JH7110_SYSCLK_TIMER2, "timer2", timer_p),
+	JH7110_GATE(JH7110_SYSCLK_TIMER3, "timer3", timer_p),
+
+	/* Temperature sensor (129-130) */
+	JH7110_GATE(JH7110_SYSCLK_TEMP_APB, "temp_apb", temp_apb_p),
+	JH7110_GATEDIV(JH7110_SYSCLK_TEMP_CORE, "temp_core", temp_core_p, 24),
+
+	/* SPI (131-137) */
+	JH7110_GATE(JH7110_SYSCLK_SPI0_APB, "spi0_apb", spi_apb0_p),
+	JH7110_GATE(JH7110_SYSCLK_SPI1_APB, "spi1_apb", spi_apb0_p),
+	JH7110_GATE(JH7110_SYSCLK_SPI2_APB, "spi2_apb", spi_apb0_p),
+	JH7110_GATE(JH7110_SYSCLK_SPI3_APB, "spi3_apb", spi_apb_p),
+	JH7110_GATE(JH7110_SYSCLK_SPI4_APB, "spi4_apb", spi_apb_p),
+	JH7110_GATE(JH7110_SYSCLK_SPI5_APB, "spi5_apb", spi_apb_p),
+	JH7110_GATE(JH7110_SYSCLK_SPI6_APB, "spi6_apb", spi_apb_p),
+
+	/* I2C (138-144) */
+	JH7110_GATE(JH7110_SYSCLK_I2C0_APB, "i2c0_apb", i2c_apb0_p),
+	JH7110_GATE(JH7110_SYSCLK_I2C1_APB, "i2c1_apb", i2c_apb0_p),
+	JH7110_GATE(JH7110_SYSCLK_I2C2_APB, "i2c2_apb", i2c_apb0_p),
+	JH7110_GATE(JH7110_SYSCLK_I2C3_APB, "i2c3_apb", i2c_apb_p),
+	JH7110_GATE(JH7110_SYSCLK_I2C4_APB, "i2c4_apb", i2c_apb_p),
+	JH7110_GATE(JH7110_SYSCLK_I2C5_APB, "i2c5_apb", i2c_apb_p),
+	JH7110_GATE(JH7110_SYSCLK_I2C6_APB, "i2c6_apb", i2c_apb_p),
+
+	/* UART 4-5 (153-156) — UART 0-3 already registered above */
+	JH7110_GATE(JH7110_SYSCLK_UART4_APB, "uart4_apb", uart45_apb_p),
+	JH7110_GATEDIV(JH7110_SYSCLK_UART4_CORE, "uart4_core", uart45_core_p, 10),
+	JH7110_GATE(JH7110_SYSCLK_UART5_APB, "uart5_apb", uart45_apb_p),
+	JH7110_GATEDIV(JH7110_SYSCLK_UART5_CORE, "uart5_core", uart45_core_p, 10),
+
+	/* Audio: PWMDAC, SPDIF (157-160) */
+	JH7110_GATE(JH7110_SYSCLK_PWMDAC_APB, "pwmdac_apb", pwmdac_apb_p),
+	JH7110_GATE(JH7110_SYSCLK_PWMDAC_CORE, "pwmdac_core", pwmdac_core_p),
+	JH7110_GATE(JH7110_SYSCLK_SPDIF_APB, "spdif_apb", spdif_apb_p),
+	JH7110_GATE(JH7110_SYSCLK_SPDIF_CORE, "spdif_core", spdif_core_p),
+
+	/* Audio: TDM, PDM (184-188) */
+	JH7110_GATE(JH7110_SYSCLK_TDM_AHB, "tdm_ahb", tdm_ahb_p),
+	JH7110_GATE(JH7110_SYSCLK_TDM_APB, "tdm_apb", tdm_apb_p),
+	JH7110_GATE(JH7110_SYSCLK_TDM_INTERNAL, "tdm_internal", tdm_internal_p),
+	JH7110_GATE(JH7110_SYSCLK_PDM_APB, "pdm_apb", pdm_apb_p),
+
+	/* JTAG/TRNG (189) */
+	JH7110_GATE(JH7110_SYSCLK_JTAG_CERTIFICATION_TRNG, "jtag_trng",
+	    jtag_trng_p),
 };
 
 static int
