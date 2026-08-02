@@ -159,6 +159,8 @@ jh7110_pwmdac_dai_init(device_t dev, uint32_t format)
 	return (0);
 }
 
+static void jh7110_pwmdac_callout(void *arg);
+
 static int
 jh7110_pwmdac_dai_trigger(device_t dev, int go, int pcm_dir)
 {
