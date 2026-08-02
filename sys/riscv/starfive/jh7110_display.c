@@ -148,25 +148,47 @@ static void
 jh7110_fb_flush(void *arg)
 {
 	struct jh7110_display_softc *sc = arg;
-	uint32_t y;
+	uint32_t y, dirty_start, stride;
 	vm_offset_t shadow, hw, prev;
+	int in_dirty;
 
 	shadow = sc->fb_shadow;
 	hw = sc->fb_vaddr;
 	prev = sc->fb_prev;
+	stride = sc->fb_stride;
+	in_dirty = 0;
+	dirty_start = 0;
 
-	for (y = 0; y < sc->fb_height; y++) {
-		uint32_t off = y * sc->fb_stride;
+	for (y = 0; y <= sc->fb_height; y++) {
+		int dirty = 0;
 
-		if (memcmp((void *)(shadow + off), (void *)(prev + off),
-		    sc->fb_stride) != 0) {
-			memcpy((void *)(hw + off), (void *)(shadow + off),
-			    sc->fb_stride);
-			memcpy((void *)(prev + off), (void *)(shadow + off),
-			    sc->fb_stride);
+		if (y < sc->fb_height) {
+			uint32_t off = y * stride;
+			const uint64_t *s = (const uint64_t *)(shadow + off);
+			const uint64_t *p = (const uint64_t *)(prev + off);
+			uint32_t i, cnt = stride / 8;
+
+			for (i = 0; i < cnt; i++) {
+				if (s[i] != p[i]) {
+					dirty = 1;
+					break;
+				}
+			}
+		}
+
+		if (dirty && !in_dirty) {
+			dirty_start = y;
+			in_dirty = 1;
+		} else if (!dirty && in_dirty) {
+			uint32_t off = dirty_start * stride;
+			uint32_t len = (y - dirty_start) * stride;
+
+			memcpy((void *)(hw + off), (void *)(shadow + off), len);
+			memcpy((void *)(prev + off), (void *)(shadow + off), len);
+			in_dirty = 0;
 		}
 	}
-	callout_reset(&sc->fb_callout, hz / 60, jh7110_fb_flush, sc);
+	callout_reset(&sc->fb_callout, hz / 120, jh7110_fb_flush, sc);
 }
 
 static int
@@ -631,7 +653,7 @@ jh7110_display_attach(device_t dev)
 
 		/* Start shadow→hw framebuffer copy at 30fps */
 		callout_init(&sc->fb_callout, 1);
-		callout_reset(&sc->fb_callout, hz / 60, jh7110_fb_flush, sc);
+		callout_reset(&sc->fb_callout, hz / 120, jh7110_fb_flush, sc);
 	}
 
 	return (0);
