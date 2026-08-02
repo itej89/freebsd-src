@@ -43,6 +43,10 @@
  */
 #define	DC_REG_BASE		0x0800
 
+/* HI registers (via hi_res mapped at 0x29400000, no subtraction) */
+#define	DC_HW_REVISION		0x0024
+#define	DC_HW_CHIP_CID		0x0030
+
 #define	DC_DISPLAY_H		(0x1430 - DC_REG_BASE)
 #define	DC_DISPLAY_H_SYNC	(0x1438 - DC_REG_BASE)
 #define	DC_DISPLAY_V		(0x1440 - DC_REG_BASE)
