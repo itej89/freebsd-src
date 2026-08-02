@@ -195,6 +195,22 @@ static const char *gclk0_p[] = { "pll0_div2" };
 static const char *gclk1_p[] = { "pll1_div2" };
 static const char *gclk2_p[] = { "pll2_div2" };
 
+/* I2S/TDM MUX parents (internal + external from DTS fixed-clock nodes) */
+static const char *i2stx0_bclk_p[] = { "i2stx0_bclk_mst", "i2stx_bclk_ext" };
+static const char *i2stx0_lrck_mst_p[] = { "i2stx0_bclk_mst_inv" };
+static const char *i2stx0_lrck_p[] = { "i2stx0_lrck_mst", "i2stx_lrck_ext" };
+static const char *i2stx0_bclk_inv_p[] = { "i2stx0_bclk" };
+static const char *i2stx1_bclk_p[] = { "i2stx1_bclk_mst", "i2stx_bclk_ext" };
+static const char *i2stx1_lrck_mst_p[] = { "i2stx1_bclk_mst_inv" };
+static const char *i2stx1_lrck_p[] = { "i2stx1_lrck_mst", "i2stx_lrck_ext" };
+static const char *i2stx1_bclk_inv_p[] = { "i2stx1_bclk" };
+static const char *i2srx_bclk_p[] = { "i2srx_bclk_mst", "i2srx_bclk_ext" };
+static const char *i2srx_lrck_mst_p[] = { "i2srx_bclk_mst_inv" };
+static const char *i2srx_lrck_p[] = { "i2srx_lrck_mst", "i2srx_lrck_ext" };
+static const char *i2srx_bclk_inv_p[] = { "i2srx_bclk" };
+static const char *tdm_tdm_p[] = { "tdm_internal", "tdm_ext" };
+static const char *tdm_tdm_inv_p[] = { "tdm_tdm" };
+
 /* non-pll SYS clocks */
 static const struct jh7110_clk_def sys_clks[] = {
 	JH7110_MUX(JH7110_SYSCLK_CPU_ROOT, "cpu_root", cpu_root_p),
@@ -492,6 +508,41 @@ static const struct jh7110_clk_def sys_clks[] = {
 
 	/* PDM */
 	JH7110_GATEDIV(JH7110_SYSCLK_PDM_DMIC, "pdm_dmic", pdm_dmic_p, 64),
+
+	/* I2S TX0 remaining: LRCK_MST(MDIV→GATEDIV), BCLK(MUX), BCLK_INV, LRCK(MUX) */
+	JH7110_GATEDIV(JH7110_SYSCLK_I2STX0_LRCK_MST, "i2stx0_lrck_mst",
+	    i2stx0_lrck_mst_p, 64),
+	JH7110_MUX(JH7110_SYSCLK_I2STX0_BCLK, "i2stx0_bclk",
+	    i2stx0_bclk_p),
+	JH7110_INV(JH7110_SYSCLK_I2STX0_BCLK_INV, "i2stx0_bclk_inv",
+	    i2stx0_bclk_inv_p),
+	JH7110_MUX(JH7110_SYSCLK_I2STX0_LRCK, "i2stx0_lrck",
+	    i2stx0_lrck_p),
+
+	/* I2S TX1 remaining */
+	JH7110_GATEDIV(JH7110_SYSCLK_I2STX1_LRCK_MST, "i2stx1_lrck_mst",
+	    i2stx1_lrck_mst_p, 64),
+	JH7110_MUX(JH7110_SYSCLK_I2STX1_BCLK, "i2stx1_bclk",
+	    i2stx1_bclk_p),
+	JH7110_INV(JH7110_SYSCLK_I2STX1_BCLK_INV, "i2stx1_bclk_inv",
+	    i2stx1_bclk_inv_p),
+	JH7110_MUX(JH7110_SYSCLK_I2STX1_LRCK, "i2stx1_lrck",
+	    i2stx1_lrck_p),
+
+	/* I2S RX remaining */
+	JH7110_GATEDIV(JH7110_SYSCLK_I2SRX_LRCK_MST, "i2srx_lrck_mst",
+	    i2srx_lrck_mst_p, 64),
+	JH7110_MUX(JH7110_SYSCLK_I2SRX_BCLK, "i2srx_bclk",
+	    i2srx_bclk_p),
+	JH7110_INV(JH7110_SYSCLK_I2SRX_BCLK_INV, "i2srx_bclk_inv",
+	    i2srx_bclk_inv_p),
+	JH7110_MUX(JH7110_SYSCLK_I2SRX_LRCK, "i2srx_lrck",
+	    i2srx_lrck_p),
+
+	/* TDM remaining */
+	JH7110_MUX(JH7110_SYSCLK_TDM_TDM, "tdm_tdm", tdm_tdm_p),
+	JH7110_INV(JH7110_SYSCLK_TDM_TDM_INV, "tdm_tdm_inv",
+	    tdm_tdm_inv_p),
 };
 
 static int
