@@ -356,14 +356,21 @@ jh7110_display_setup_dc(struct jh7110_display_softc *sc)
 	stride = width * 4;
 	sc->fb_size = stride * height;
 
-	/* Allocate framebuffer memory (physically contiguous) */
-	sc->fb_vaddr = (vm_offset_t)contigmalloc(sc->fb_size, M_DEVBUF,
-	    M_NOWAIT | M_ZERO, 0, ~0UL, PAGE_SIZE, 0);
-	if (sc->fb_vaddr == 0) {
-		device_printf(sc->dev, "failed to allocate framebuffer\n");
-		return (ENOMEM);
+	/* Allocate framebuffer (physically contiguous, mapped uncacheable) */
+	{
+		void *tmp;
+
+		tmp = contigmalloc(sc->fb_size, M_DEVBUF,
+		    M_NOWAIT | M_ZERO, 0, ~0UL, PAGE_SIZE, 0);
+		if (tmp == NULL) {
+			device_printf(sc->dev, "failed to allocate framebuffer\n");
+			return (ENOMEM);
+		}
+		sc->fb_paddr = vtophys(tmp);
 	}
-	sc->fb_paddr = vtophys(sc->fb_vaddr);
+	sc->fb_vaddr = (vm_offset_t)pmap_mapdev_attr(sc->fb_paddr,
+	    sc->fb_size, VM_MEMATTR_UNCACHEABLE);
+	memset((void *)sc->fb_vaddr, 0, sc->fb_size);
 
 	device_printf(sc->dev, "framebuffer %dx%d at phys 0x%lx\n",
 	    width, height, (unsigned long)sc->fb_paddr);
@@ -564,6 +571,8 @@ jh7110_display_attach(device_t dev)
 	sc->fb_info.fb_bpp = 32;
 	sc->fb_info.fb_stride = MODE_720P_HACTIVE * 4;
 	sc->fb_info.fb_size = sc->fb_size;
+	sc->fb_info.fb_flags = FB_FLAG_MEMATTR;
+	sc->fb_info.fb_memattr = VM_MEMATTR_UNCACHEABLE;
 
 	if (vt_fb_attach(&sc->fb_info) != 0)
 		device_printf(dev, "vt_fb_attach failed\n");
