@@ -124,7 +124,10 @@ struct jh7110_display_softc {
 	vm_paddr_t		fb_paddr;
 	vm_offset_t		fb_vaddr;	/* uncacheable HW framebuffer */
 	vm_offset_t		fb_shadow;	/* cached shadow buffer (vt writes here) */
+	vm_offset_t		fb_prev;	/* cached prev copy for dirty detection */
 	uint32_t		fb_size;
+	uint32_t		fb_stride;
+	uint32_t		fb_height;
 	struct callout		fb_callout;
 };
 
@@ -145,9 +148,25 @@ static void
 jh7110_fb_flush(void *arg)
 {
 	struct jh7110_display_softc *sc = arg;
+	uint32_t y;
+	vm_offset_t shadow, hw, prev;
 
-	memcpy((void *)sc->fb_vaddr, (void *)sc->fb_shadow, sc->fb_size);
-	callout_reset(&sc->fb_callout, hz / 30, jh7110_fb_flush, sc);
+	shadow = sc->fb_shadow;
+	hw = sc->fb_vaddr;
+	prev = sc->fb_prev;
+
+	for (y = 0; y < sc->fb_height; y++) {
+		uint32_t off = y * sc->fb_stride;
+
+		if (memcmp((void *)(shadow + off), (void *)(prev + off),
+		    sc->fb_stride) != 0) {
+			memcpy((void *)(hw + off), (void *)(shadow + off),
+			    sc->fb_stride);
+			memcpy((void *)(prev + off), (void *)(shadow + off),
+			    sc->fb_stride);
+		}
+	}
+	callout_reset(&sc->fb_callout, hz / 60, jh7110_fb_flush, sc);
 }
 
 static int
@@ -392,13 +411,17 @@ jh7110_display_setup_dc(struct jh7110_display_softc *sc)
 	    sc->fb_size, VM_MEMATTR_UNCACHEABLE);
 	memset((void *)sc->fb_vaddr, 0, sc->fb_size);
 
-	/* Allocate cached shadow buffer — vt(4) writes here for speed */
+	/* Allocate cached shadow + prev buffers for dirty-line tracking */
 	sc->fb_shadow = (vm_offset_t)malloc(sc->fb_size, M_DEVBUF,
 	    M_NOWAIT | M_ZERO);
-	if (sc->fb_shadow == 0) {
-		device_printf(sc->dev, "failed to allocate shadow buffer\n");
+	sc->fb_prev = (vm_offset_t)malloc(sc->fb_size, M_DEVBUF,
+	    M_NOWAIT | M_ZERO);
+	if (sc->fb_shadow == 0 || sc->fb_prev == 0) {
+		device_printf(sc->dev, "failed to allocate shadow buffers\n");
 		return (ENOMEM);
 	}
+	sc->fb_stride = stride;
+	sc->fb_height = height;
 
 	device_printf(sc->dev, "framebuffer %dx%d at phys 0x%lx\n",
 	    width, height, (unsigned long)sc->fb_paddr);
@@ -608,7 +631,7 @@ jh7110_display_attach(device_t dev)
 
 		/* Start shadow→hw framebuffer copy at 30fps */
 		callout_init(&sc->fb_callout, 1);
-		callout_reset(&sc->fb_callout, hz / 30, jh7110_fb_flush, sc);
+		callout_reset(&sc->fb_callout, hz / 60, jh7110_fb_flush, sc);
 	}
 
 	return (0);
