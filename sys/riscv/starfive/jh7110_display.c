@@ -81,7 +81,9 @@
 
 struct jh7110_display_softc {
 	device_t		dev;
-	struct resource		*dc_res;	/* DC8200 registers */
+	struct resource		*hi_res;	/* DC8200 "hi" regs (rev, IRQ) */
+	int			hi_rid;
+	struct resource		*dc_res;	/* DC8200 "dc" regs (fb, timing) */
 	int			dc_rid;
 	struct resource		*hdmi_res;	/* HDMI registers */
 	int			hdmi_rid;
@@ -96,6 +98,7 @@ static struct ofw_compat_data compat_data[] = {
 	{ NULL,			0 }
 };
 
+#define	HI_RD4(sc, off)		bus_read_4((sc)->hi_res, (off))
 #define	DC_RD4(sc, off)		bus_read_4((sc)->dc_res, (off))
 #define	DC_WR4(sc, off, v)	bus_write_4((sc)->dc_res, (off), (v))
 
@@ -155,7 +158,16 @@ jh7110_display_attach(device_t dev)
 	sc = device_get_softc(dev);
 	sc->dev = dev;
 
-	/* Map DC8200 registers (second reg entry = control regs) */
+	/* Map DC8200 "hi" registers (reg[0] = 0x29400000, revision/IRQ) */
+	sc->hi_rid = 0;
+	sc->hi_res = bus_alloc_resource_any(dev, SYS_RES_MEMORY,
+	    &sc->hi_rid, RF_ACTIVE);
+	if (sc->hi_res == NULL) {
+		device_printf(dev, "could not allocate HI registers\n");
+		return (ENXIO);
+	}
+
+	/* Map DC8200 "dc" registers (reg[1] = 0x29400800, fb/timing) */
 	sc->dc_rid = 1;
 	sc->dc_res = bus_alloc_resource_any(dev, SYS_RES_MEMORY,
 	    &sc->dc_rid, RF_ACTIVE);
@@ -167,9 +179,9 @@ jh7110_display_attach(device_t dev)
 	/* Stage A: Enable clocks and deassert resets */
 	jh7110_display_init_clocks(dev);
 
-	/* Read hardware revision */
-	rev = DC_RD4(sc, DC_HW_REVISION);
-	cid = DC_RD4(sc, DC_HW_CHIP_CID);
+	/* Read hardware revision from "hi" register space */
+	rev = HI_RD4(sc, DC_HW_REVISION);
+	cid = HI_RD4(sc, DC_HW_CHIP_CID);
 	device_printf(dev, "DC8200 revision 0x%04x, chip ID 0x%03x\n",
 	    rev, cid);
 
@@ -192,6 +204,9 @@ jh7110_display_detach(device_t dev)
 
 	sc = device_get_softc(dev);
 
+	if (sc->hi_res != NULL)
+		bus_release_resource(dev, SYS_RES_MEMORY, sc->hi_rid,
+		    sc->hi_res);
 	if (sc->dc_res != NULL)
 		bus_release_resource(dev, SYS_RES_MEMORY, sc->dc_rid,
 		    sc->dc_res);
