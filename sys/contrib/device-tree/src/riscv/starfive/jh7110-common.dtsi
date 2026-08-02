@@ -785,3 +785,11 @@
 &U74_4 {
 	cpu-supply = <&vdd_cpu>;
 };
+
+&dc8200 {
+	status = "okay";
+};
+
+&hdmi {
+	status = "okay";
+};
