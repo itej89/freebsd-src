@@ -55,6 +55,8 @@
 #define	DC_FRAMEBUFFER_BOTTOM_RIGHT	0x24E0
 #define	DC_FRAMEBUFFER_BG_COLOR	0x1528
 #define	DC_DISPLAY_DP_CONFIG	0x1CD0
+#define	DC_DISPLAY_DPI_CONFIG	0x14B8
+#define	DC_DISPLAY_DITHER_CONFIG 0x1410
 
 /* DC8200 pixel formats */
 #define	FORMAT_X8R8G8B8		5
@@ -341,8 +343,14 @@ jh7110_display_setup_dc(struct jh7110_display_softc *sc)
 	device_printf(sc->dev, "framebuffer %dx%d at phys 0x%lx\n",
 	    width, height, (unsigned long)sc->fb_paddr);
 
-	/* Stop display panel before configuring */
-	dc_set_clear(sc, DC_DISPLAY_PANEL_START, 0, 0x0f);
+	/* dc_hw_init: set panel config to 0x111 (bits 0,4,8) */
+	DC_WR4(sc, DC_DISPLAY_PANEL_CONFIG, 0x111);
+
+	/* Disable dither */
+	DC_WR4(sc, DC_DISPLAY_DITHER_CONFIG, 0);
+
+	/* Stop panel 0 before configuring */
+	dc_set_clear(sc, DC_DISPLAY_PANEL_START, 0, (1 << 0) | (1 << 2));
 
 	/* Set display timing: 720p @ 60Hz */
 	DC_WR4(sc, DC_DISPLAY_H,
@@ -350,16 +358,25 @@ jh7110_display_setup_dc(struct jh7110_display_softc *sc)
 	DC_WR4(sc, DC_DISPLAY_H_SYNC,
 	    MODE_720P_HSYNC_START |
 	    (MODE_720P_HSYNC_END << 15) |
-	    (1 << 30));	/* hsync positive */
+	    (1 << 30));	/* positive hsync: bit 31 clear, bit 30 set */
 	DC_WR4(sc, DC_DISPLAY_V,
 	    MODE_720P_VACTIVE | (MODE_720P_VTOTAL << 16));
 	DC_WR4(sc, DC_DISPLAY_V_SYNC,
 	    MODE_720P_VSYNC_START |
 	    (MODE_720P_VSYNC_END << 15) |
-	    (1 << 30));	/* vsync positive */
+	    (1 << 30));	/* positive vsync: bit 31 clear, bit 30 set */
 
 	/* Set background color to blue (visible = working) */
 	DC_WR4(sc, DC_FRAMEBUFFER_BG_COLOR, 0x000040FF);
+
+	/* DPI config: RGB888 = 5 */
+	DC_WR4(sc, DC_DISPLAY_DPI_CONFIG, 5);
+
+	/* DP config: RGB888(2) + DP select(BIT3) for HDMI output */
+	DC_WR4(sc, DC_DISPLAY_DP_CONFIG, 2 | (1 << 3));
+
+	/* Clear YUV mode in panel config (bit 16) */
+	dc_set_clear(sc, DC_DISPLAY_PANEL_CONFIG, 0, (1 << 16));
 
 	/* Configure primary plane (plane 0) */
 	DC_WR4(sc, DC_FRAMEBUFFER_ADDRESS, (uint32_t)sc->fb_paddr);
@@ -378,10 +395,7 @@ jh7110_display_setup_dc(struct jh7110_display_softc *sc)
 	    (1 << 13),		/* enable */
 	    (1 << 13) | (7 << 16) | (1 << 19));
 
-	/* Select DP output mode (for HDMI) */
-	dc_set_clear(sc, DC_DISPLAY_DP_CONFIG, (1 << 3), 0);
-
-	/* Panel config: enable output */
+	/* Panel config: enable output (bit 12) */
 	dc_set_clear(sc, DC_DISPLAY_PANEL_CONFIG, (1 << 12), 0);
 
 	/* Start panel 0 */
