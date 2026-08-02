@@ -1219,7 +1219,7 @@
 		dc8200: dc8200@29400000 {
 			compatible = "verisilicon,dc8200";
 			reg = <0x0 0x29400000 0x0 0x100>,
-			      <0x0 0x29400800 0x0 0x3000>;
+			      <0x0 0x29400800 0x0 0x2000>;
 			interrupts = <95>;
 			clocks = <&syscrg JH7110_SYSCLK_NOC_BUS_DISP_AXI>,
 				 <&syscrg JH7110_SYSCLK_VOUT_SRC>,
