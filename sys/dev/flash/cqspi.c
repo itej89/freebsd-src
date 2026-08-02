@@ -446,16 +446,21 @@ cqspi_write(device_t dev, device_t child, struct bio *bp,
 	reg |= DEVRD_INST_WIDTH_SINGLE;
 	WRITE4(sc, CQSPI_DEVRD, reg);
 
-	xdma_enqueue_bio(sc->xchan_tx, &bp,
-	    sc->sram_phys, 4, 4, XDMA_MEM_TO_DEV);
-	xdma_queue_submit(sc->xchan_tx);
-
-	sc->write_op_done = 0;
-
 	WRITE4(sc, CQSPI_INDWR, INDRD_START);
 
-	while (sc->write_op_done == 0)
-		tsleep(&sc->xdma_tx, PCATCH | PZERO, "spi", hz/2);
+	if (sc->xdma_tx != NULL) {
+		xdma_enqueue_bio(sc->xchan_tx, &bp,
+		    sc->sram_phys, 4, 4, XDMA_MEM_TO_DEV);
+		xdma_queue_submit(sc->xchan_tx);
+		sc->write_op_done = 0;
+		while (sc->write_op_done == 0)
+			tsleep(&sc->xdma_tx, PCATCH | PZERO, "spi", hz/2);
+	} else {
+		/* PIO write: copy data to SRAM window */
+		bus_write_region_1(sc->res[1], 0, (uint8_t *)data, count);
+		while ((READ4(sc, CQSPI_INDWR) & INDRD_START) != 0)
+			DELAY(10);
+	}
 
 	cqspi_wait_idle(sc);
 
@@ -498,16 +503,21 @@ cqspi_read(device_t dev, device_t child, struct bio *bp,
 	WRITE4(sc, CQSPI_MODEBIT, 0xff);
 	WRITE4(sc, CQSPI_IRQMASK, 0);
 
-	xdma_enqueue_bio(sc->xchan_rx, &bp, sc->sram_phys, 4, 4,
-	    XDMA_DEV_TO_MEM);
-	xdma_queue_submit(sc->xchan_rx);
-
-	sc->read_op_done = 0;
-
 	WRITE4(sc, CQSPI_INDRD, INDRD_START);
 
-	while (sc->read_op_done == 0)
-		tsleep(&sc->xdma_rx, PCATCH | PZERO, "spi", hz/2);
+	if (sc->xdma_rx != NULL) {
+		xdma_enqueue_bio(sc->xchan_rx, &bp, sc->sram_phys, 4, 4,
+		    XDMA_DEV_TO_MEM);
+		xdma_queue_submit(sc->xchan_rx);
+		sc->read_op_done = 0;
+		while (sc->read_op_done == 0)
+			tsleep(&sc->xdma_rx, PCATCH | PZERO, "spi", hz/2);
+	} else {
+		/* PIO read: wait for completion, then copy from SRAM */
+		while ((READ4(sc, CQSPI_INDRD) & INDRD_START) != 0)
+			DELAY(10);
+		bus_read_region_1(sc->res[1], 0, (uint8_t *)data, count);
+	}
 
 	cqspi_wait_idle(sc);
 
@@ -674,53 +684,57 @@ cqspi_attach(device_t dev)
 
 	caps = 0;
 
-	/* Get xDMA controller. */
+	/* Get xDMA controller (optional — use PIO if unavailable). */
 	sc->xdma_tx = xdma_ofw_get(sc->dev, "tx");
-	if (sc->xdma_tx == NULL) {
-		device_printf(dev, "Can't find DMA controller.\n");
-		return (ENXIO);
-	}
-
 	sc->xdma_rx = xdma_ofw_get(sc->dev, "rx");
-	if (sc->xdma_rx == NULL) {
-		device_printf(dev, "Can't find DMA controller.\n");
-		return (ENXIO);
+
+	if (sc->xdma_tx != NULL && sc->xdma_rx != NULL) {
+		/* Alloc xDMA virtual channels. */
+		sc->xchan_tx = xdma_channel_alloc(sc->xdma_tx, caps);
+		if (sc->xchan_tx == NULL) {
+			device_printf(dev,
+			    "Can't alloc TX DMA channel, using PIO.\n");
+			sc->xdma_tx = NULL;
+			sc->xdma_rx = NULL;
+		}
+		sc->xchan_rx = xdma_channel_alloc(sc->xdma_rx, caps);
+		if (sc->xchan_rx == NULL) {
+			device_printf(dev,
+			    "Can't alloc RX DMA channel, using PIO.\n");
+			sc->xdma_tx = NULL;
+			sc->xdma_rx = NULL;
+		}
+	} else {
+		device_printf(dev, "No DMA controller, using PIO mode.\n");
+		sc->xdma_tx = NULL;
+		sc->xdma_rx = NULL;
 	}
 
-	/* Alloc xDMA virtual channels. */
-	sc->xchan_tx = xdma_channel_alloc(sc->xdma_tx, caps);
-	if (sc->xchan_tx == NULL) {
-		device_printf(dev, "Can't alloc virtual DMA channel.\n");
-		return (ENXIO);
-	}
+	/* Setup xDMA interrupt handlers (skip if no DMA). */
+	if (sc->xdma_tx != NULL) {
+		error = xdma_setup_intr(sc->xchan_tx, 0,
+		    cqspi_xdma_tx_intr, sc, &sc->ih_tx);
+		if (error) {
+			device_printf(sc->dev,
+			    "Can't setup xDMA TX interrupt.\n");
+			return (ENXIO);
+		}
 
-	sc->xchan_rx = xdma_channel_alloc(sc->xdma_rx, caps);
-	if (sc->xchan_rx == NULL) {
-		device_printf(dev, "Can't alloc virtual DMA channel.\n");
-		return (ENXIO);
-	}
+		error = xdma_setup_intr(sc->xchan_rx, 0,
+		    cqspi_xdma_rx_intr, sc, &sc->ih_rx);
+		if (error) {
+			device_printf(sc->dev,
+			    "Can't setup xDMA RX interrupt.\n");
+			return (ENXIO);
+		}
 
-	/* Setup xDMA interrupt handlers. */
-	error = xdma_setup_intr(sc->xchan_tx, 0, cqspi_xdma_tx_intr,
-	    sc, &sc->ih_tx);
-	if (error) {
-		device_printf(sc->dev,
-		    "Can't setup xDMA interrupt handler.\n");
-		return (ENXIO);
+		xdma_prep_sg(sc->xchan_tx, TX_QUEUE_SIZE, maxphys,
+		    8, 16, 0, BUS_SPACE_MAXADDR_32BIT,
+		    BUS_SPACE_MAXADDR);
+		xdma_prep_sg(sc->xchan_rx, TX_QUEUE_SIZE, maxphys,
+		    8, 16, 0, BUS_SPACE_MAXADDR_32BIT,
+		    BUS_SPACE_MAXADDR);
 	}
-
-	error = xdma_setup_intr(sc->xchan_rx, 0, cqspi_xdma_rx_intr,
-	    sc, &sc->ih_rx);
-	if (error) {
-		device_printf(sc->dev,
-		    "Can't setup xDMA interrupt handler.\n");
-		return (ENXIO);
-	}
-
-	xdma_prep_sg(sc->xchan_tx, TX_QUEUE_SIZE, maxphys, 8, 16, 0,
-	    BUS_SPACE_MAXADDR_32BIT, BUS_SPACE_MAXADDR);
-	xdma_prep_sg(sc->xchan_rx, TX_QUEUE_SIZE, maxphys, 8, 16, 0,
-	    BUS_SPACE_MAXADDR_32BIT, BUS_SPACE_MAXADDR);
 
 	cqspi_init(sc);
 
