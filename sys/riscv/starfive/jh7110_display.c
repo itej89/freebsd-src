@@ -54,6 +54,7 @@
 #define	DC_FRAMEBUFFER_TOP_LEFT		0x24D8
 #define	DC_FRAMEBUFFER_BOTTOM_RIGHT	0x24E0
 #define	DC_FRAMEBUFFER_BG_COLOR	0x1528
+#define	DC_DISPLAY_DP_CONFIG	0x1CD0
 
 /* DC8200 pixel formats */
 #define	FORMAT_X8R8G8B8		5
@@ -89,6 +90,8 @@ struct jh7110_display_softc {
 	int			dc_rid;
 	struct resource		*hdmi_res;	/* HDMI registers */
 	int			hdmi_rid;
+	struct resource		*dss_res;	/* dssctrl syscon */
+	int			dss_rid;
 	struct fb_info		fb_info;
 	vm_paddr_t		fb_paddr;
 	vm_offset_t		fb_vaddr;
@@ -366,6 +369,9 @@ jh7110_display_setup_dc(struct jh7110_display_softc *sc)
 	    (1 << 13),		/* enable */
 	    (1 << 13) | (7 << 16) | (1 << 19));
 
+	/* Select DP output mode (for HDMI) */
+	dc_set_clear(sc, DC_DISPLAY_DP_CONFIG, (1 << 3), 0);
+
 	/* Panel config: enable output */
 	dc_set_clear(sc, DC_DISPLAY_PANEL_CONFIG, (1 << 12), 0);
 
@@ -423,6 +429,28 @@ jh7110_display_attach(device_t dev)
 
 	/* Stage A: Enable clocks and deassert resets */
 	jh7110_display_init_clocks(dev);
+
+	/* Map dssctrl syscon (output mux) at fixed address */
+	sc->dss_rid = 3;
+	sc->dss_res = bus_alloc_resource(dev, SYS_RES_MEMORY,
+	    &sc->dss_rid, 0x295b0000, 0x295b008f, 0x90, RF_ACTIVE);
+	if (sc->dss_res != NULL) {
+		uint32_t val;
+
+		/* Route DC8200 to HDMI: set bit 20 at offset 0x04 */
+		val = bus_read_4(sc->dss_res, 0x04);
+		val |= (1 << 20);
+		bus_write_4(sc->dss_res, 0x04, val);
+
+		/* Enable display path: set bit 3 at offset 0x08 */
+		val = bus_read_4(sc->dss_res, 0x08);
+		val |= (1 << 3);
+		bus_write_4(sc->dss_res, 0x08, val);
+
+		device_printf(dev, "dssctrl mux configured for HDMI\n");
+	} else {
+		device_printf(dev, "warning: could not map dssctrl\n");
+	}
 
 	/* Read hardware revision from "hi" register space */
 	rev = HI_RD4(sc, DC_HW_REVISION);
