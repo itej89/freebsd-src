@@ -135,6 +135,16 @@ jh7110_pwmdac_attach(device_t dev)
 	node = ofw_bus_get_node(dev);
 	OF_device_register_xref(OF_xref_from_node(node), dev);
 
+	{
+		uint64_t freq;
+
+		if (clk_get_freq(sc->clk_core, &freq) == 0)
+			device_printf(dev, "core clk: %lu Hz\n",
+			    (unsigned long)freq);
+		if (clk_get_freq(sc->clk_apb, &freq) == 0)
+			device_printf(dev, "apb clk: %lu Hz\n",
+			    (unsigned long)freq);
+	}
 	device_printf(dev, "PWMDAC audio at 0x%lx\n",
 	    rman_get_start(sc->res));
 
@@ -277,13 +287,25 @@ static void
 jh7110_pwmdac_thread(void *arg)
 {
 	struct jh7110_pwmdac_softc *sc = arg;
+	int dbg_count = 0;
 
 	while (!sc->thread_exit) {
-		if ((PWMDAC_RD(sc, PWMDAC_SATAE) & 0x02) == 0) {
+		uint32_t satae = PWMDAC_RD(sc, PWMDAC_SATAE);
+
+		if ((satae & 0x02) == 0) {
 			if (sc->intr_handler != NULL)
 				sc->intr_handler(sc->intr_arg);
 		} else {
 			DELAY(100);
+		}
+
+		if (++dbg_count == 50000) {
+			device_printf(sc->dev,
+			    "SATAE=0x%08x CTRL=0x%08x play_ptr=%u\n",
+			    satae,
+			    PWMDAC_RD(sc, PWMDAC_CTRL),
+			    sc->play_ptr);
+			dbg_count = 0;
 		}
 	}
 	kproc_exit(0);
@@ -331,6 +353,15 @@ jh7110_pwmdac_dai_set_chanspeed(device_t dev, uint32_t speed)
 	}
 
 	clk_set_freq(sc->clk_core, mclk + 64, CLK_SET_ROUND_DOWN);
+
+	{
+		uint64_t actual;
+		if (clk_get_freq(sc->clk_core, &actual) == 0)
+			device_printf(sc->dev,
+			    "chanspeed %u: cnt_n=%u mclk_req=%lu mclk_actual=%lu\n",
+			    speed, cnt_n, (unsigned long)mclk,
+			    (unsigned long)actual);
+	}
 
 	PWMDAC_LOCK(sc);
 	ctrl = PWMDAC_RD(sc, PWMDAC_CTRL);
