@@ -15,10 +15,13 @@
 #include <sys/bus.h>
 #include <sys/callout.h>
 #include <sys/kernel.h>
+#include <sys/kthread.h>
 #include <sys/lock.h>
 #include <sys/module.h>
 #include <sys/mutex.h>
+#include <sys/proc.h>
 #include <sys/rman.h>
+#include <sys/unistd.h>
 
 #include <machine/bus.h>
 
@@ -70,8 +73,9 @@ struct jh7110_pwmdac_softc {
 	uint32_t		speed;
 	driver_intr_t		*intr_handler;
 	void			*intr_arg;
-	struct callout		intr_callout;
-	int			running;
+	struct proc		*tx_thread;
+	volatile int		running;
+	volatile int		thread_exit;
 };
 
 #define	PWMDAC_LOCK(sc)		mtx_lock(&(sc)->mtx)
@@ -159,7 +163,7 @@ jh7110_pwmdac_dai_init(device_t dev, uint32_t format)
 	return (0);
 }
 
-static void jh7110_pwmdac_callout(void *arg);
+static void jh7110_pwmdac_thread(void *arg);
 
 static int
 jh7110_pwmdac_dai_trigger(device_t dev, int go, int pcm_dir)
@@ -172,25 +176,28 @@ jh7110_pwmdac_dai_trigger(device_t dev, int go, int pcm_dir)
 	if (pcm_dir != PCMDIR_PLAY)
 		return (EINVAL);
 
-	PWMDAC_LOCK(sc);
-	ctrl = PWMDAC_RD(sc, PWMDAC_CTRL);
-
 	switch (go) {
 	case PCMTRIG_START:
 		sc->play_ptr = 0;
+		sc->thread_exit = 0;
 		sc->running = 1;
+		PWMDAC_LOCK(sc);
+		ctrl = PWMDAC_RD(sc, PWMDAC_CTRL);
 		PWMDAC_WR(sc, PWMDAC_CTRL, ctrl | CTRL_ENABLE);
-		callout_reset(&sc->intr_callout, 1,
-		    jh7110_pwmdac_callout, sc);
+		PWMDAC_UNLOCK(sc);
+		kproc_create(jh7110_pwmdac_thread, sc, &sc->tx_thread,
+		    0, 0, "pwmdac_tx");
 		break;
 	case PCMTRIG_STOP:
 	case PCMTRIG_ABORT:
+		sc->thread_exit = 1;
 		sc->running = 0;
+		PWMDAC_LOCK(sc);
+		ctrl = PWMDAC_RD(sc, PWMDAC_CTRL);
 		PWMDAC_WR(sc, PWMDAC_CTRL, ctrl & ~CTRL_ENABLE);
-		callout_stop(&sc->intr_callout);
+		PWMDAC_UNLOCK(sc);
 		break;
 	}
-	PWMDAC_UNLOCK(sc);
 
 	return (0);
 }
@@ -219,13 +226,16 @@ jh7110_pwmdac_dai_intr(device_t dev, struct snd_dbuf *play_buf,
 	samples = play_buf->buf;
 
 	written = 0;
-	while (count >= 4 && written < 256) {
+	while (count >= 4 && written < 8) {
+		uint16_t left, right;
 		uint32_t sample;
 
-		sample = samples[readyptr % size] |
-		    (samples[(readyptr + 1) % size] << 8) |
-		    (samples[(readyptr + 2) % size] << 16) |
-		    (samples[(readyptr + 3) % size] << 24);
+		left = samples[readyptr % size] |
+		    (samples[(readyptr + 1) % size] << 8);
+		right = samples[(readyptr + 2) % size] |
+		    (samples[(readyptr + 3) % size] << 8);
+		sample = (uint32_t)left | ((uint32_t)right << 16);
+
 		PWMDAC_WR(sc, PWMDAC_WDATA, sample);
 		readyptr += 4;
 		count -= 4;
@@ -233,7 +243,8 @@ jh7110_pwmdac_dai_intr(device_t dev, struct snd_dbuf *play_buf,
 	}
 	sc->play_ptr += written;
 	sc->play_ptr %= size;
-	ret |= AUDIO_DAI_PLAY_INTR;
+	if (written > 0)
+		ret |= AUDIO_DAI_PLAY_INTR;
 out:
 	PWMDAC_UNLOCK(sc);
 
@@ -263,15 +274,19 @@ jh7110_pwmdac_dai_get_ptr(device_t dev, int pcm_dir)
 }
 
 static void
-jh7110_pwmdac_callout(void *arg)
+jh7110_pwmdac_thread(void *arg)
 {
 	struct jh7110_pwmdac_softc *sc = arg;
 
-	if (sc->intr_handler != NULL)
-		sc->intr_handler(sc->intr_arg);
-
-	if (sc->running)
-		callout_reset(&sc->intr_callout, 1, jh7110_pwmdac_callout, sc);
+	while (!sc->thread_exit) {
+		if ((PWMDAC_RD(sc, PWMDAC_SATAE) & 0x02) == 0) {
+			if (sc->intr_handler != NULL)
+				sc->intr_handler(sc->intr_arg);
+		} else {
+			DELAY(100);
+		}
+	}
+	kproc_exit(0);
 }
 
 static int
@@ -283,8 +298,6 @@ jh7110_pwmdac_dai_setup_intr(device_t dev, driver_intr_t intr_handler,
 	sc = device_get_softc(dev);
 	sc->intr_handler = intr_handler;
 	sc->intr_arg = intr_arg;
-
-	callout_init(&sc->intr_callout, 1);
 
 	return (0);
 }
