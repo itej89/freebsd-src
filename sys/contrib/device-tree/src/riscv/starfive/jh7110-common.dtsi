@@ -41,11 +41,6 @@
 		#sound-dai-cells = <0>;
 	};
 
-	hdmi_codec: hdmi-audio-codec {
-		compatible = "linux,spdif-dit";
-		#sound-dai-cells = <0>;
-	};
-
 	sound {
 		compatible = "simple-audio-card";
 		simple-audio-card,name = "StarFive-PWMDAC-Sound-Card";
@@ -57,20 +52,6 @@
 
 		simple-audio-card,codec {
 			sound-dai = <&pwmdac_codec>;
-		};
-	};
-
-	hdmi-sound {
-		compatible = "simple-audio-card";
-		simple-audio-card,name = "StarFive-HDMI-Sound-Card";
-		simple-audio-card,format = "i2s";
-
-		simple-audio-card,cpu {
-			sound-dai = <&i2stx0>;
-		};
-
-		simple-audio-card,codec {
-			sound-dai = <&hdmi_codec>;
 		};
 	};
 };
@@ -445,10 +426,6 @@
 &pwmdac {
 	pinctrl-names = "default";
 	pinctrl-0 = <&pwmdac_pins>;
-	status = "okay";
-};
-
-&i2stx0 {
 	status = "okay";
 };
 
