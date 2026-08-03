@@ -115,7 +115,7 @@ static struct platform_driver lkpi_test_driver = {
 	},
 };
 
-module_platform_driver(lkpi_test_driver);
+module_platform_driver(lkpi_test_driver)
 
 MODULE_DESCRIPTION("LinuxKPI platform device shim test");
 MODULE_LICENSE("BSD");
