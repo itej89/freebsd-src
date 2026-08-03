@@ -115,7 +115,26 @@ static struct platform_driver lkpi_test_driver = {
 	},
 };
 
-module_platform_driver(lkpi_test_driver)
+static int
+lkpi_test_modevent(module_t mod __unused, int event, void *arg __unused)
+{
 
-MODULE_DESCRIPTION("LinuxKPI platform device shim test");
-MODULE_LICENSE("BSD");
+	switch (event) {
+	case MOD_LOAD:
+		return (linux_platform_register_driver(&lkpi_test_driver));
+	case MOD_UNLOAD:
+		linux_platform_unregister_driver(&lkpi_test_driver);
+		return (0);
+	default:
+		return (EOPNOTSUPP);
+	}
+}
+
+static moduledata_t lkpi_test_mod = {
+	"lkpi_platform_test",
+	lkpi_test_modevent,
+	NULL
+};
+
+DECLARE_MODULE(lkpi_platform_test, lkpi_test_mod, SI_SUB_DRIVERS, SI_ORDER_ANY);
+MODULE_DEPEND(lkpi_platform_test, linuxkpi, 1, 1, 1);

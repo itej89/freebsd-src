@@ -14,18 +14,18 @@
 #include <sys/bus.h>
 #include <sys/rman.h>
 
-#ifdef FDT
-#include <dev/ofw/openfirm.h>
-#include <dev/ofw/ofw_bus.h>
-#include <dev/ofw/ofw_bus_subr.h>
-#endif
-
 #include <linux/kernel.h>
 #include <linux/device.h>
 #include <linux/platform_device.h>
 #include <linux/of.h>
 #include <linux/list.h>
 #include <linux/slab.h>
+
+#ifdef FDT
+
+#include <dev/ofw/openfirm.h>
+#include <dev/ofw/ofw_bus.h>
+#include <dev/ofw/ofw_bus_subr.h>
 
 #define	LKPI_IORESOURCE_MEM	(1 << SYS_RES_MEMORY)
 #define	LKPI_IORESOURCE_IO	(1 << SYS_RES_IOPORT)
@@ -53,7 +53,6 @@ linux_platform_get_driver(device_t dev)
 	return (container_of(drv, struct platform_driver, bsddriver));
 }
 
-#ifdef FDT
 static const struct of_device_id *
 linux_platform_match_of(device_t dev, const struct of_device_id *table)
 {
@@ -67,12 +66,10 @@ linux_platform_match_of(device_t dev, const struct of_device_id *table)
 	}
 	return (NULL);
 }
-#endif
 
 static int
 linux_platform_probe(device_t dev)
 {
-#ifdef FDT
 	struct platform_driver *pdrv;
 	const struct of_device_id *id;
 
@@ -89,9 +86,6 @@ linux_platform_probe(device_t dev)
 
 	device_set_desc(dev, pdrv->driver.name);
 	return (BUS_PROBE_DEFAULT);
-#else
-	return (ENXIO);
-#endif
 }
 
 static int
@@ -99,9 +93,7 @@ linux_platform_attach(device_t dev)
 {
 	struct platform_driver *pdrv;
 	struct platform_device *pdev;
-#ifdef FDT
 	struct device_node *np;
-#endif
 	int error;
 
 	pdrv = linux_platform_get_driver(dev);
@@ -122,7 +114,6 @@ linux_platform_attach(device_t dev)
 	pdev->dev.driver = &pdrv->driver;
 	pdev->dev.parent = &linux_root_device;
 
-#ifdef FDT
 	pdev->node = ofw_bus_get_node(dev);
 
 	np = kmalloc(sizeof(*np), GFP_KERNEL);
@@ -131,17 +122,17 @@ linux_platform_attach(device_t dev)
 	np->phandle = pdev->node;
 	np->full_name = pdrv->driver.name;
 	pdev->dev.of_node = np;
-#endif
 
-	if (pdrv->probe == NULL)
+	if (pdrv->probe == NULL) {
+		kfree(np);
+		pdev->dev.of_node = NULL;
 		return (ENXIO);
+	}
 
 	error = pdrv->probe(pdev);
 	if (error != 0) {
-#ifdef FDT
 		kfree(pdev->dev.of_node);
 		pdev->dev.of_node = NULL;
-#endif
 		return (-error);
 	}
 
@@ -172,10 +163,8 @@ linux_platform_detach(device_t dev)
 	}
 	pdev->bsd_nres = 0;
 
-#ifdef FDT
 	kfree(pdev->dev.of_node);
 	pdev->dev.of_node = NULL;
-#endif
 
 	return (0);
 }
@@ -278,7 +267,6 @@ devm_platform_ioremap_resource(struct platform_device *pdev,
 int
 linux_platform_register_driver(struct platform_driver *pdrv)
 {
-#ifdef FDT
 	devclass_t dc;
 
 	if (pdrv->driver.name == NULL)
@@ -294,20 +282,30 @@ linux_platform_register_driver(struct platform_driver *pdrv)
 
 	return (-devclass_add_driver(dc, &pdrv->bsddriver,
 	    BUS_PASS_DEFAULT, &pdrv->bsdclass));
-#else
-	return (-ENOENT);
-#endif
 }
 
 void
 linux_platform_unregister_driver(struct platform_driver *pdrv)
 {
-#ifdef FDT
 	devclass_t dc;
 
 	dc = devclass_find("simplebus");
 	if (dc == NULL)
 		return;
 	devclass_delete_driver(dc, &pdrv->bsddriver);
-#endif
 }
+
+#else /* !FDT */
+
+int
+linux_platform_register_driver(struct platform_driver *pdrv __unused)
+{
+	return (-ENOENT);
+}
+
+void
+linux_platform_unregister_driver(struct platform_driver *pdrv __unused)
+{
+}
+
+#endif /* FDT */
