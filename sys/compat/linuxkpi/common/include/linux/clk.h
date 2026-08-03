@@ -48,4 +48,73 @@ bool lkpi_clk_is_enabled(struct clk *clk);
 #define	clk_set_parent		lkpi_clk_set_parent
 #define	__clk_is_enabled	lkpi_clk_is_enabled
 
+struct clk_bulk_data {
+	const char	*id;
+	struct clk	*clk;
+};
+
+static inline int
+clk_bulk_get(struct device *dev, int num_clks, struct clk_bulk_data *clks)
+{
+	int i;
+
+	for (i = 0; i < num_clks; i++) {
+		clks[i].clk = lkpi_clk_get(dev, clks[i].id);
+		if (IS_ERR(clks[i].clk)) {
+			while (--i >= 0)
+				lkpi_clk_put(clks[i].clk);
+			return (PTR_ERR(clks[i + 1].clk));
+		}
+	}
+	return (0);
+}
+
+static inline int
+devm_clk_bulk_get(struct device *dev, int num_clks,
+    struct clk_bulk_data *clks)
+{
+	int i;
+
+	for (i = 0; i < num_clks; i++) {
+		clks[i].clk = lkpi_devm_clk_get(dev, clks[i].id);
+		if (IS_ERR(clks[i].clk))
+			return (PTR_ERR(clks[i].clk));
+	}
+	return (0);
+}
+
+static inline int
+clk_bulk_prepare_enable(int num_clks, struct clk_bulk_data *clks)
+{
+	int i, error;
+
+	for (i = 0; i < num_clks; i++) {
+		error = lkpi_clk_prepare_enable(clks[i].clk);
+		if (error != 0) {
+			while (--i >= 0)
+				lkpi_clk_disable_unprepare(clks[i].clk);
+			return (error);
+		}
+	}
+	return (0);
+}
+
+static inline void
+clk_bulk_disable_unprepare(int num_clks, struct clk_bulk_data *clks)
+{
+	int i;
+
+	for (i = num_clks - 1; i >= 0; i--)
+		lkpi_clk_disable_unprepare(clks[i].clk);
+}
+
+static inline void
+clk_bulk_put(int num_clks, struct clk_bulk_data *clks)
+{
+	int i;
+
+	for (i = 0; i < num_clks; i++)
+		lkpi_clk_put(clks[i].clk);
+}
+
 #endif /* _LINUXKPI_LINUX_CLK_H */

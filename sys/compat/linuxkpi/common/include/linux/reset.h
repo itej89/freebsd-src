@@ -52,4 +52,36 @@ devm_reset_control_get_shared(struct device *dev, const char *id)
 	return (lkpi_devm_reset_control_get(dev, id));
 }
 
+static inline struct reset_control *
+devm_reset_control_get_optional_shared(struct device *dev, const char *id)
+{
+	return (lkpi_devm_reset_control_get_optional(dev, id));
+}
+
+static inline int
+reset_control_bulk_deassert(int num_rstcs, struct reset_control **rstcs)
+{
+	int i, error;
+
+	for (i = 0; i < num_rstcs; i++) {
+		error = lkpi_reset_control_deassert(rstcs[i]);
+		if (error != 0) {
+			while (--i >= 0)
+				lkpi_reset_control_assert(rstcs[i]);
+			return (error);
+		}
+	}
+	return (0);
+}
+
+static inline int
+reset_control_bulk_assert(int num_rstcs, struct reset_control **rstcs)
+{
+	int i;
+
+	for (i = num_rstcs - 1; i >= 0; i--)
+		lkpi_reset_control_assert(rstcs[i]);
+	return (0);
+}
+
 #endif /* _LINUXKPI_LINUX_RESET_H */
