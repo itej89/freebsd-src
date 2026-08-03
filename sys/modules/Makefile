@@ -224,6 +224,7 @@ SUBDIR=	\
 	linuxkpi_hdmi \
 	linuxkpi_video \
 	linuxkpi_wlan \
+	lkpi_platform_test \
 	${_lio} \
 	lpt \
 	${_mac_biba} \
