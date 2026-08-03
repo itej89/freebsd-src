@@ -7,6 +7,8 @@
  * Wraps FreeBSD's hwreset subsystem.
  */
 
+#include "opt_platform.h"
+
 #include <sys/param.h>
 #include <sys/kernel.h>
 #include <sys/malloc.h>

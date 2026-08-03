@@ -11,6 +11,8 @@
  * Instead we forward-declare the lkpi_* prototypes locally.
  */
 
+#include "opt_platform.h"
+
 #include <sys/param.h>
 #include <sys/kernel.h>
 #include <sys/malloc.h>

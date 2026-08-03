@@ -8,6 +8,8 @@
  * following the same pattern as linux_pci.c.
  */
 
+#include "opt_platform.h"
+
 #include <sys/param.h>
 #include <sys/kernel.h>
 #include <sys/module.h>
