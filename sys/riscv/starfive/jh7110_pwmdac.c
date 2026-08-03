@@ -218,7 +218,7 @@ jh7110_pwmdac_dai_intr(device_t dev, struct snd_dbuf *play_buf,
 {
 	struct jh7110_pwmdac_softc *sc;
 	uint8_t *samples;
-	uint32_t count, size, readyptr, written;
+	uint32_t count, size, readyptr;
 	int ret = 0;
 
 	sc = device_get_softc(dev);
@@ -235,8 +235,7 @@ jh7110_pwmdac_dai_intr(device_t dev, struct snd_dbuf *play_buf,
 	readyptr = sndbuf_getreadyptr(play_buf);
 	samples = play_buf->buf;
 
-	written = 0;
-	while (count >= 4 && written < 8) {
+	{
 		uint16_t left, right;
 		uint32_t sample;
 
@@ -247,14 +246,9 @@ jh7110_pwmdac_dai_intr(device_t dev, struct snd_dbuf *play_buf,
 		sample = (uint32_t)left | ((uint32_t)right << 16);
 
 		PWMDAC_WR(sc, PWMDAC_WDATA, sample);
-		readyptr += 4;
-		count -= 4;
-		written += 4;
-	}
-	sc->play_ptr += written;
-	sc->play_ptr %= size;
-	if (written > 0)
+		sc->play_ptr = (sc->play_ptr + 4) % size;
 		ret |= AUDIO_DAI_PLAY_INTR;
+	}
 out:
 	PWMDAC_UNLOCK(sc);
 
@@ -287,26 +281,11 @@ static void
 jh7110_pwmdac_thread(void *arg)
 {
 	struct jh7110_pwmdac_softc *sc = arg;
-	int dbg_count = 0;
 
 	while (!sc->thread_exit) {
-		uint32_t satae = PWMDAC_RD(sc, PWMDAC_SATAE);
-
-		if ((satae & 0x02) == 0) {
-			if (sc->intr_handler != NULL)
-				sc->intr_handler(sc->intr_arg);
-		} else {
-			DELAY(100);
-		}
-
-		if (++dbg_count == 50000) {
-			device_printf(sc->dev,
-			    "SATAE=0x%08x CTRL=0x%08x play_ptr=%u\n",
-			    satae,
-			    PWMDAC_RD(sc, PWMDAC_CTRL),
-			    sc->play_ptr);
-			dbg_count = 0;
-		}
+		if (sc->intr_handler != NULL)
+			sc->intr_handler(sc->intr_arg);
+		DELAY(21);
 	}
 	kproc_exit(0);
 }
