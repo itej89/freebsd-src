@@ -87,4 +87,10 @@ struct dmi_system_id {
 /* struct usb_device_id is defined in sys/dev/usb/usbdi.h. */
 /* MODULE_DEVICE_TABLE_BUS_usb we have in usb.h. */
 
+/* OF (Open Firmware / Device Tree) */
+struct of_device_id {
+	char		compatible[128];
+	const void	*data;
+};
+
 #endif	/* __LINUXKPI_LINUX_MOD_DEVICETABLE_H__ */

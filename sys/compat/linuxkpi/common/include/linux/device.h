@@ -48,12 +48,14 @@
 #include <linux/overflow.h>
 #include <linux/ratelimit.h>	/* via linux/dev_printk.h */
 #include <linux/fwnode.h>
+#include <linux/mod_devicetable.h>
 #include <asm/atomic.h>
 
 #include <sys/bus.h>
 #include <sys/backlight.h>
 
 struct device;
+struct device_node;
 
 struct class {
 	const char	*name;
@@ -90,6 +92,7 @@ struct dev_pm_ops {
 struct device_driver {
 	const char	*name;
 	const struct dev_pm_ops *pm;
+	const struct of_device_id *of_match_table;
 
 	void (*shutdown) (struct device *);
 	void (*coredump) (struct device *);
@@ -125,6 +128,7 @@ struct device {
 	unsigned int	irq_end;
 	const struct attribute_group **groups;
 	struct fwnode_handle *fwnode;
+	struct device_node *of_node;
 	struct cdev	*backlight_dev;
 	struct backlight_device	*bd;
 
