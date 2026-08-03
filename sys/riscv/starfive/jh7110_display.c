@@ -99,16 +99,16 @@
 #define	HDMI_TIMING_VS		0xA4
 #define	HDMI_TIMING_VACT	0xA8
 
-/* 640x480@60Hz (VGA) timing — small fb for fast uncacheable writes */
-#define	MODE_HACTIVE		640
-#define	MODE_HTOTAL		800
-#define	MODE_HSYNC_START	656
-#define	MODE_HSYNC_END		752
-#define	MODE_VACTIVE		480
-#define	MODE_VTOTAL		525
-#define	MODE_VSYNC_START	490
-#define	MODE_VSYNC_END		492
-#define	MODE_PIXCLK		25175000
+/* 720p@60Hz timing */
+#define	MODE_HACTIVE		1280
+#define	MODE_HTOTAL		1650
+#define	MODE_HSYNC_START	1390
+#define	MODE_HSYNC_END		1430
+#define	MODE_VACTIVE		720
+#define	MODE_VTOTAL		750
+#define	MODE_VSYNC_START	725
+#define	MODE_VSYNC_END		730
+#define	MODE_PIXCLK		74250000
 
 struct jh7110_display_softc {
 	device_t		dev;
@@ -234,24 +234,24 @@ jh7110_display_init_clocks(device_t dev)
 #define	HDMI_WR(sc, off, v)	bus_write_4((sc)->hdmi_res, (off) * 4, (v))
 #define	HDMI_RD(sc, off)	bus_read_4((sc)->hdmi_res, (off) * 4)
 
-/* Pre-PLL config for 25.175 MHz (640x480@60Hz) from Linux table */
+/* Pre-PLL config for 74.25 MHz (720p@60Hz) from Linux table */
 static const struct {
 	uint8_t prediv, fbdiv_hi, fbdiv_lo;
 	uint8_t tmds_div_a, tmds_div_b, tmds_div_c;
 	uint8_t pclk_div_a, pclk_div_b, pclk_div_c, pclk_div_d;
 	uint32_t fracdiv;
 } hdmi_pre_pll = {
-	.prediv = 1, .fbdiv_hi = 0, .fbdiv_lo = 100,
-	.tmds_div_a = 2, .tmds_div_b = 3, .tmds_div_c = 3,
-	.pclk_div_a = 12, .pclk_div_b = 3, .pclk_div_c = 3, .pclk_div_d = 4,
-	.fracdiv = 0xF55555,
+	.prediv = 1, .fbdiv_hi = 0, .fbdiv_lo = 99,
+	.tmds_div_a = 1, .tmds_div_b = 2, .tmds_div_c = 2,
+	.pclk_div_a = 1, .pclk_div_b = 2, .pclk_div_c = 3, .pclk_div_d = 4,
+	.fracdiv = 0,
 };
 
-/* Post-PLL config for 25.175 MHz */
+/* Post-PLL config for 74.25 MHz */
 static const struct {
 	uint8_t prediv, fbdiv, postdiv, post_div_en;
 } hdmi_post_pll = {
-	.prediv = 1, .fbdiv = 80, .postdiv = 13, .post_div_en = 3,
+	.prediv = 1, .fbdiv = 20, .postdiv = 1, .post_div_en = 3,
 };
 
 static int
@@ -293,7 +293,7 @@ jh7110_hdmi_init(struct jh7110_display_softc *sc)
 	/* PHY power down */
 	HDMI_WR(sc, 0x00, 0x63);
 
-	/* Configure PLL for 25.175 MHz (640x480) */
+	/* Configure PLL for 74.25 MHz (720p) */
 	HDMI_WR(sc, 0x1a0, 0x01);
 	HDMI_WR(sc, 0x1aa, 0x0f);
 	HDMI_WR(sc, 0x1a1, hdmi_pre_pll.prediv);
@@ -347,14 +347,14 @@ jh7110_hdmi_init(struct jh7110_display_softc *sc)
 	/* Turn on serializer */
 	HDMI_WR(sc, 0x1be, 0x71);
 
-	/* Eye diagram improvement for 640x480 (VIC 1) */
+	/* Eye diagram improvement for 720p (VIC 4) */
 	HDMI_WR(sc, 0x1bf, 0x00);
 	HDMI_WR(sc, 0x1c0, 0x00);
 
 	/* PHY power down before timing config */
 	HDMI_WR(sc, 0x00, 0x63);
 
-	/* Configure video timing for 640x480 */
+	/* Configure video timing for 720p */
 	HDMI_WR(sc, 0x09, MODE_HTOTAL & 0xff);
 	HDMI_WR(sc, 0x0a, (MODE_HTOTAL >> 8) & 0xff);
 	HDMI_WR(sc, 0x0b, (MODE_HTOTAL - MODE_HACTIVE) & 0xff);
@@ -369,8 +369,8 @@ jh7110_hdmi_init(struct jh7110_display_softc *sc)
 	HDMI_WR(sc, 0x14, MODE_VTOTAL - MODE_VSYNC_START);
 	HDMI_WR(sc, 0x15, MODE_VSYNC_END - MODE_VSYNC_START);
 
-	/* External video timing, hsync+vsync negative (640x480) */
-	HDMI_WR(sc, 0x08, (1 << 0));
+	/* External video timing, hsync+vsync positive (720p) */
+	HDMI_WR(sc, 0x08, (1 << 0) | (1 << 2) | (1 << 3));
 
 	/* PHY power on */
 	HDMI_WR(sc, 0x00, 0x61);
@@ -382,7 +382,7 @@ jh7110_hdmi_init(struct jh7110_display_softc *sc)
 	HDMI_WR(sc, 0xce, 0x00);
 	HDMI_WR(sc, 0xce, 0x01);
 
-	device_printf(sc->dev, "HDMI TX initialized for 640x480@60Hz\n");
+	device_printf(sc->dev, "HDMI TX initialized for 720p@60Hz\n");
 
 	return (0);
 }
@@ -473,13 +473,13 @@ jh7110_display_setup_dc(struct jh7110_display_softc *sc)
 	DC_WR4(sc, DC_DISPLAY_H_SYNC,
 	    MODE_HSYNC_START |
 	    (MODE_HSYNC_END << 15) |
-	    (1 << 31) | (1 << 30));	/* negative hsync */
+	    (1 << 30));	/* positive hsync */
 	DC_WR4(sc, DC_DISPLAY_V,
 	    MODE_VACTIVE | (MODE_VTOTAL << 16));
 	DC_WR4(sc, DC_DISPLAY_V_SYNC,
 	    MODE_VSYNC_START |
 	    (MODE_VSYNC_END << 15) |
-	    (1 << 31) | (1 << 30));	/* negative vsync */
+	    (1 << 30));	/* positive vsync */
 
 	/* Set background color to black */
 	DC_WR4(sc, DC_FRAMEBUFFER_BG_COLOR, 0x00000000);
@@ -539,7 +539,7 @@ jh7110_display_setup_dc(struct jh7110_display_softc *sc)
 	/* Start panel 0 */
 	dc_set_clear(sc, DC_DISPLAY_PANEL_START, (1 << 0), (1 << 3));
 
-	device_printf(sc->dev, "display timing set: 640x480@60Hz\n");
+	device_printf(sc->dev, "display timing set: 720p@60Hz\n");
 
 	return (0);
 }

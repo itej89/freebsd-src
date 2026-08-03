@@ -81,7 +81,7 @@
 };
 
 &hdmitx0_pixelclk {
-	clock-frequency = <25175000>;
+	clock-frequency = <74250000>;
 };
 
 &i2srx_bclk_ext {
