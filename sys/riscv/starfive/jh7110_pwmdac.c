@@ -148,13 +148,12 @@ static int
 jh7110_pwmdac_dai_init(device_t dev, uint32_t format)
 {
 	struct jh7110_pwmdac_softc *sc;
-	uint32_t ctrl;
 
 	sc = device_get_softc(dev);
 
-	ctrl = CTRL_SHIFT_8BIT | CTRL_DUTY_CENTER |
-	    (1 << CTRL_CNT_N_SHIFT);
-	PWMDAC_WR(sc, PWMDAC_CTRL, ctrl);
+	/* 8-bit shift, center duty cycle, cnt_n=0 (set properly in set_chanspeed) */
+	PWMDAC_WR(sc, PWMDAC_CTRL,
+	    CTRL_SHIFT_8BIT | CTRL_DUTY_CENTER);
 
 	return (0);
 }
@@ -219,13 +218,21 @@ jh7110_pwmdac_dai_intr(device_t dev, struct snd_dbuf *play_buf,
 	samples = play_buf->buf;
 
 	written = 0;
-	while (count >= 4 && written < 256) {
+	while (count >= 4 && written < 64) {
+		uint16_t left, right;
 		uint32_t sample;
 
-		sample = samples[readyptr % size] |
-		    (samples[(readyptr + 1) % size] << 8) |
-		    (samples[(readyptr + 2) % size] << 16) |
-		    (samples[(readyptr + 3) % size] << 24);
+		/* Check FIFO status — stop if full */
+		if (PWMDAC_RD(sc, PWMDAC_SATAE) & 0x02)
+			break;
+
+		/* S16_LE stereo: left in low 16, right in high 16 */
+		left = samples[readyptr % size] |
+		    (samples[(readyptr + 1) % size] << 8);
+		right = samples[(readyptr + 2) % size] |
+		    (samples[(readyptr + 3) % size] << 8);
+		sample = (uint32_t)left | ((uint32_t)right << 16);
+
 		PWMDAC_WR(sc, PWMDAC_WDATA, sample);
 		readyptr += 4;
 		count -= 4;
@@ -233,7 +240,8 @@ jh7110_pwmdac_dai_intr(device_t dev, struct snd_dbuf *play_buf,
 	}
 	sc->play_ptr += written;
 	sc->play_ptr %= size;
-	ret |= AUDIO_DAI_PLAY_INTR;
+	if (written > 0)
+		ret |= AUDIO_DAI_PLAY_INTR;
 out:
 	PWMDAC_UNLOCK(sc);
 
@@ -319,10 +327,11 @@ jh7110_pwmdac_dai_set_chanspeed(device_t dev, uint32_t speed)
 
 	clk_set_freq(sc->clk_core, mclk + 64, CLK_SET_ROUND_DOWN);
 
+	/* Linux writes (datan - 1) to the cnt_n field */
 	PWMDAC_LOCK(sc);
 	ctrl = PWMDAC_RD(sc, PWMDAC_CTRL);
 	ctrl &= ~CTRL_CNT_N_MASK;
-	ctrl |= (cnt_n << CTRL_CNT_N_SHIFT);
+	ctrl |= ((cnt_n - 1) << CTRL_CNT_N_SHIFT);
 	PWMDAC_WR(sc, PWMDAC_CTRL, ctrl);
 	PWMDAC_UNLOCK(sc);
 
