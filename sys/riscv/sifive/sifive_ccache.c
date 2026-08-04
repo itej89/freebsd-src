@@ -29,6 +29,8 @@
 #include <vm/vm_extern.h>
 #include <vm/pmap.h>
 
+#include <riscv/sifive/sifive_ccache.h>
+
 #define	SIFIVE_CCACHE_CONFIG	0x000
 #define	 CCACHE_CONFIG_WAYS_S	8
 #define	 CCACHE_CONFIG_WAYS_M	(0xff << CCACHE_CONFIG_WAYS_S)
