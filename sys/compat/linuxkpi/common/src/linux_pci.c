@@ -1609,11 +1609,11 @@ linux_dma_map_phys_common(struct device *dev, vm_paddr_t phys, size_t len,
 	 * physical address, short-circuit the remainder of the
 	 * bus_dma API.  This avoids tracking collisions in the pctrie
 	 * with the additional benefit of reducing overhead.
-	 *
-	 * Skip on RISC-V: non-coherent platforms need the full busdma
-	 * path so that bus_dmamap_sync performs cache maintenance.
 	 */
-#if !defined(__riscv)
+#if defined(__riscv)
+	/* No IOMMU on RISC-V SoCs — all DMA is identity-mapped. */
+	return (phys);
+#else
 	if (bus_dma_id_mapped(dmat, phys, len))
 		return (phys);
 #endif
