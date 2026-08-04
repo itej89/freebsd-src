@@ -63,6 +63,9 @@ static const char *usb0_refclk_p[] = { "osc" };
 static const char *dma1p_axi_p[] = { "stg_axiahb" };
 static const char *dma1p_ahb_p[] = { "stg_axiahb" };
 
+static const char *sec_ahb_p[] = { "stg_axiahb" };
+static const char *sec_misc_ahb_p[] = { "stg_axiahb" };
+
 /* STG clocks */
 static const struct jh7110_clk_def stg_clks[] = {
 	JH7110_GATE(JH7110_STGCLK_USB0_APB, "usb0_apb", usb0_apb_p),
@@ -89,6 +92,9 @@ static const struct jh7110_clk_def stg_clks[] = {
 	JH7110_GATEDIV(JH7110_STGCLK_E2_RTC, "e2_rtc", e2_rtc_p, 24),
 	JH7110_GATE(JH7110_STGCLK_E2_CORE, "e2_core", e2_core_p),
 	JH7110_GATE(JH7110_STGCLK_E2_DBG, "e2_dbg", e2_dbg_p),
+
+	JH7110_GATE(JH7110_STGCLK_SEC_AHB, "sec_ahb", sec_ahb_p),
+	JH7110_GATE(JH7110_STGCLK_SEC_MISC_AHB, "sec_misc_ahb", sec_misc_ahb_p),
 
 	JH7110_GATE(JH7110_STGCLK_DMA1P_AXI, "dma1p_axi", dma1p_axi_p),
 	JH7110_GATE(JH7110_STGCLK_DMA1P_AHB, "dma1p_ahb", dma1p_ahb_p),
