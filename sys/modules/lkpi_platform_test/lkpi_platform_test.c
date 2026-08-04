@@ -19,6 +19,7 @@
 #include <linux/property.h>
 #include <linux/regmap.h>
 #include <linux/component.h>
+#include <linux/dma-mapping.h>
 #include <linux/io.h>
 
 #ifdef FDT
@@ -278,6 +279,48 @@ lkpi_test_probe(struct platform_device *pdev)
 		}
 	}
 #endif
+
+	/* Test 13: DMA mapping */
+	{
+		void *dma_buf;
+		dma_addr_t dma_handle;
+		dma_addr_t mapped;
+
+		error = dma_set_mask_and_coherent(&pdev->dev, DMA_BIT_MASK(32));
+		if (error == 0) {
+			pr_info("lkpi_test: T13 PASS - dma_set_mask_and_coherent ok\n");
+		} else {
+			pr_info("lkpi_test: T13 FAIL - dma_set_mask error %d\n",
+			    error);
+			goto t13_done;
+		}
+
+		dma_buf = dma_alloc_coherent(&pdev->dev, 4096,
+		    &dma_handle, GFP_KERNEL);
+		if (dma_buf != NULL) {
+			*(volatile uint32_t *)dma_buf = 0xDEADBEEF;
+			pr_info("lkpi_test: T13 PASS - dma_alloc_coherent: va=%p dma=0x%lx val=0x%08x\n",
+			    dma_buf, (unsigned long)dma_handle,
+			    *(volatile uint32_t *)dma_buf);
+
+			mapped = dma_map_single(&pdev->dev, dma_buf, 4096,
+			    DMA_TO_DEVICE);
+			if (!dma_mapping_error(&pdev->dev, mapped)) {
+				pr_info("lkpi_test: T13 PASS - dma_map_single: 0x%lx\n",
+				    (unsigned long)mapped);
+				dma_unmap_single(&pdev->dev, mapped, 4096,
+				    DMA_TO_DEVICE);
+			} else {
+				pr_info("lkpi_test: T13 FAIL - dma_map_single error\n");
+			}
+
+			dma_free_coherent(&pdev->dev, 4096, dma_buf,
+			    dma_handle);
+		} else {
+			pr_info("lkpi_test: T13 FAIL - dma_alloc_coherent returned NULL\n");
+		}
+	}
+t13_done:
 
 	pr_info("lkpi_test: ALL TESTS COMPLETE\n");
 	return (0);

@@ -19,6 +19,7 @@
 #include <linux/kernel.h>
 #include <linux/device.h>
 #include <linux/platform_device.h>
+#include <linux/dma-mapping.h>
 #include <linux/of.h>
 #include <linux/list.h>
 #include <linux/slab.h>
@@ -136,30 +137,53 @@ linux_platform_attach(device_t dev)
 		}
 	}
 
-	if (pdrv->probe == NULL) {
-		if (pdev->pwrdom != NULL) {
-			pwrdom_disable(pdev->pwrdom);
-			pwrdom_release(pdev->pwrdom);
-			pdev->pwrdom = NULL;
+	/* Initialize DMA support */
+	{
+		struct linux_dma_priv *priv;
+
+		priv = kmalloc(sizeof(*priv), GFP_KERNEL);
+		if (priv != NULL) {
+			mtx_init(&priv->lock, "lkpi-plat-dma", NULL, MTX_DEF);
+			pctrie_init(&priv->ptree);
+			pdev->dev.dma_priv = priv;
+			linux_dma_tag_init(&pdev->dev, DMA_BIT_MASK(64));
+			linux_dma_tag_init_coherent(&pdev->dev,
+			    DMA_BIT_MASK(32));
 		}
-		kfree(np);
-		pdev->dev.of_node = NULL;
-		return (ENXIO);
+	}
+
+	if (pdrv->probe == NULL) {
+		error = ENXIO;
+		goto err;
 	}
 
 	error = pdrv->probe(pdev);
 	if (error != 0) {
-		if (pdev->pwrdom != NULL) {
-			pwrdom_disable(pdev->pwrdom);
-			pwrdom_release(pdev->pwrdom);
-			pdev->pwrdom = NULL;
-		}
-		kfree(pdev->dev.of_node);
-		pdev->dev.of_node = NULL;
-		return (-error);
+		error = -error;
+		goto err;
 	}
 
 	return (0);
+
+err:
+	if (pdev->dev.dma_priv != NULL) {
+		struct linux_dma_priv *priv = pdev->dev.dma_priv;
+		if (priv->dmat)
+			bus_dma_tag_destroy(priv->dmat);
+		if (priv->dmat_coherent)
+			bus_dma_tag_destroy(priv->dmat_coherent);
+		mtx_destroy(&priv->lock);
+		kfree(priv);
+		pdev->dev.dma_priv = NULL;
+	}
+	if (pdev->pwrdom != NULL) {
+		pwrdom_disable(pdev->pwrdom);
+		pwrdom_release(pdev->pwrdom);
+		pdev->pwrdom = NULL;
+	}
+	kfree(pdev->dev.of_node);
+	pdev->dev.of_node = NULL;
+	return (error);
 }
 
 static int
@@ -185,6 +209,17 @@ linux_platform_detach(device_t dev)
 		}
 	}
 	pdev->bsd_nres = 0;
+
+	if (pdev->dev.dma_priv != NULL) {
+		struct linux_dma_priv *priv = pdev->dev.dma_priv;
+		if (priv->dmat)
+			bus_dma_tag_destroy(priv->dmat);
+		if (priv->dmat_coherent)
+			bus_dma_tag_destroy(priv->dmat_coherent);
+		mtx_destroy(&priv->lock);
+		kfree(priv);
+		pdev->dev.dma_priv = NULL;
+	}
 
 	if (pdev->pwrdom != NULL) {
 		pwrdom_disable(pdev->pwrdom);

@@ -138,14 +138,7 @@ struct pcim_iomap_devres {
 	struct resource	*res_table[PCIR_MAX_BAR_0 + 1];
 };
 
-struct linux_dma_priv {
-	uint64_t	dma_mask;
-	bus_dma_tag_t	dmat;
-	uint64_t	dma_coherent_mask;
-	bus_dma_tag_t	dmat_coherent;
-	struct mtx	lock;
-	struct pctrie	ptree;
-};
+/* struct linux_dma_priv is defined in linux/dma-mapping.h */
 #define	DMA_PRIV_LOCK(priv) mtx_lock(&(priv)->lock)
 #define	DMA_PRIV_UNLOCK(priv) mtx_unlock(&(priv)->lock)
 

@@ -47,6 +47,8 @@
 #include <vm/pmap.h>
 
 #include <machine/bus.h>
+#include <sys/mutex.h>
+#include <sys/pctrie.h>
 
 enum dma_data_direction {
 	DMA_BIDIRECTIONAL = 0,
@@ -89,6 +91,15 @@ struct dma_map_ops {
 };
 
 #define	DMA_BIT_MASK(n)	((2ULL << ((n) - 1)) - 1ULL)
+
+struct linux_dma_priv {
+	uint64_t	dma_mask;
+	bus_dma_tag_t	dmat;
+	uint64_t	dma_coherent_mask;
+	bus_dma_tag_t	dmat_coherent;
+	struct mtx	lock;
+	struct pctrie	ptree;
+};
 
 int linux_dma_tag_init(struct device *, u64);
 int linux_dma_tag_init_coherent(struct device *, u64);
