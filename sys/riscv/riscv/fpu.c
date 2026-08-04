@@ -14,6 +14,7 @@
 #include <sys/proc.h>
 #include <sys/pcpu.h>
 
+#include <machine/reg.h>
 #include <machine/pcb.h>
 #include <machine/fpe.h>
 #include <machine/fpu.h>
