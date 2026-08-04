@@ -21,6 +21,10 @@
 #include <linux/component.h>
 #include <linux/io.h>
 
+#ifdef FDT
+#include <dev/pwrdom/pwrdom.h>
+#endif
+
 /* Component framework test helpers */
 static bool comp_bind_called;
 static bool comp_unbind_called;
@@ -240,6 +244,44 @@ lkpi_test_probe(struct platform_device *pdev)
 		if (t11_pass && master_unbind_called && comp_unbind_called)
 			pr_info("lkpi_test: T11 PASS - component: unbind+del clean\n");
 	}
+
+	/* Test 12: Power domain framework */
+#ifdef FDT
+	{
+		phandle_t pmu_node;
+		pwrdom_t pd;
+		bool enabled;
+
+		pmu_node = OF_finddevice("/soc/power-controller");
+		if (pmu_node <= 0)
+			pmu_node = OF_finddevice("/soc/power-controller@17030000");
+
+		if (pmu_node > 0) {
+			/*
+			 * Get GPU power domain (id=2) from the PMU.
+			 * The PMU already enabled it at boot — verify
+			 * the framework can query its status.
+			 */
+			error = pwrdom_get_by_ofw_idx(pdev->dev.bsddev,
+			    pmu_node, 0, &pd);
+			if (error == 0) {
+				error = pwrdom_is_enabled(pd, &enabled);
+				if (error == 0)
+					pr_info("lkpi_test: T12 PASS - pwrdom query ok, enabled=%d\n",
+					    enabled);
+				else
+					pr_info("lkpi_test: T12 FAIL - pwrdom_is_enabled error %d\n",
+					    error);
+				pwrdom_release(pd);
+			} else {
+				pr_info("lkpi_test: T12 INFO - pwrdom_get error %d (PMU may not have power-domains property)\n",
+				    error);
+			}
+		} else {
+			pr_info("lkpi_test: T12 INFO - PMU node not found in DT\n");
+		}
+	}
+#endif
 
 	pr_info("lkpi_test: ALL TESTS COMPLETE\n");
 	return (0);

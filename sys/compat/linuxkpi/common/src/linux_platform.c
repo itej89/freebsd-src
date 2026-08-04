@@ -28,6 +28,7 @@
 #include <dev/ofw/openfirm.h>
 #include <dev/ofw/ofw_bus.h>
 #include <dev/ofw/ofw_bus_subr.h>
+#include <dev/pwrdom/pwrdom.h>
 
 #define	LKPI_IORESOURCE_MEM	(1 << SYS_RES_MEMORY)
 #define	LKPI_IORESOURCE_IO	(1 << SYS_RES_IOPORT)
@@ -125,7 +126,22 @@ linux_platform_attach(device_t dev)
 	np->full_name = pdrv->driver.name;
 	pdev->dev.of_node = np;
 
+	/* Auto-attach power domain if present in DT */
+	{
+		pwrdom_t pd;
+
+		if (pwrdom_get_by_ofw_idx(dev, pdev->node, 0, &pd) == 0) {
+			pwrdom_enable(pd);
+			pdev->pwrdom = pd;
+		}
+	}
+
 	if (pdrv->probe == NULL) {
+		if (pdev->pwrdom != NULL) {
+			pwrdom_disable(pdev->pwrdom);
+			pwrdom_release(pdev->pwrdom);
+			pdev->pwrdom = NULL;
+		}
 		kfree(np);
 		pdev->dev.of_node = NULL;
 		return (ENXIO);
@@ -133,6 +149,11 @@ linux_platform_attach(device_t dev)
 
 	error = pdrv->probe(pdev);
 	if (error != 0) {
+		if (pdev->pwrdom != NULL) {
+			pwrdom_disable(pdev->pwrdom);
+			pwrdom_release(pdev->pwrdom);
+			pdev->pwrdom = NULL;
+		}
 		kfree(pdev->dev.of_node);
 		pdev->dev.of_node = NULL;
 		return (-error);
@@ -164,6 +185,12 @@ linux_platform_detach(device_t dev)
 		}
 	}
 	pdev->bsd_nres = 0;
+
+	if (pdev->pwrdom != NULL) {
+		pwrdom_disable(pdev->pwrdom);
+		pwrdom_release(pdev->pwrdom);
+		pdev->pwrdom = NULL;
+	}
 
 	kfree(pdev->dev.of_node);
 	pdev->dev.of_node = NULL;

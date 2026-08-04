@@ -31,6 +31,7 @@ struct platform_device {
 	void			*bsd_res[LKPI_PLATFORM_MAX_RES];
 	int			bsd_rid[LKPI_PLATFORM_MAX_RES];
 	int			bsd_nres;
+	void			*pwrdom;
 };
 
 struct platform_driver {
