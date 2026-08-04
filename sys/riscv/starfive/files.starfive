@@ -26,3 +26,4 @@ riscv/starfive/jh7110_temp.c		standard
 riscv/starfive/jh7110_wdt.c		standard
 riscv/starfive/jh7110_pcie.c		optional	pci fdt
 riscv/starfive/starfive_syscon.c	standard
+riscv/sifive/sifive_ccache.c		standard

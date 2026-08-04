@@ -2,32 +2,15 @@
  * SPDX-License-Identifier: BSD-2-Clause
  *
  * Copyright (c) 2024 Ruslan Bukin <br@bsdpad.com>
+ * Copyright (c) 2026 Tej Kiran
  *
- * This software was developed by the University of Cambridge Computer
- * Laboratory (Department of Computer Science and Technology) under Innovate
- * UK project 105694, "Digital Security by Design (DSbD) Technology Platform
- * Prototype".
+ * SiFive / StarFive L2 cache controller driver.
+ * Provides cache flush via FLUSH64 register and uncached-offset
+ * remapping for DMA coherency on non-coherent RISC-V SoCs.
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in the
- *    documentation and/or other materials provided with the distribution.
- *
- * THIS SOFTWARE IS PROVIDED BY THE AUTHOR AND CONTRIBUTORS ``AS IS'' AND
- * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
- * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
- * ARE DISCLAIMED.  IN NO EVENT SHALL THE AUTHOR OR CONTRIBUTORS BE LIABLE
- * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
- * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
- * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
- * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
- * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
- * SUCH DAMAGE.
+ * On JH7110: does NOT install as cache hooks (T-Head L1 ops already
+ * installed). Instead exports sifive_ccache_flush_range() for use
+ * by busdma and LinuxKPI.
  */
 
 #include <sys/param.h>
@@ -40,7 +23,7 @@
 
 #include <dev/ofw/ofw_bus.h>
 #include <dev/ofw/ofw_bus_subr.h>
-#include <dev/fdt/fdt_common.h>
+#include <dev/ofw/openfirm.h>
 
 #include <vm/vm.h>
 #include <vm/vm_extern.h>
@@ -60,8 +43,11 @@
     *(volatile uint64_t *)((uintptr_t)ccache_va + (offset)) = (value)
 
 static struct ofw_compat_data compat_data[] = {
-	{ "sifive,eic7700",			1 },
-	{ NULL,					0 }
+	{ "sifive,ccache0",		1 },
+	{ "starfive,jh7110-ccache",	1 },
+	{ "sifive,fu740-c000-ccache",	1 },
+	{ "sifive,eic7700",		1 },
+	{ NULL,				0 }
 };
 
 struct ccache_softc {
@@ -69,21 +55,17 @@ struct ccache_softc {
 };
 
 static void *ccache_va = NULL;
+static bool ccache_probed = false;
+static uint64_t ccache_uncached_offset = 0;
 
 static struct resource_spec ccache_spec[] = {
 	{ SYS_RES_MEMORY,	0,	RF_ACTIVE },
 	{ -1, 0 }
 };
 
-/*
- * Non-standard EIC7700 cache-flushing routine.
- */
-static void
-ccache_flush_range(vm_offset_t start, size_t len)
+void
+sifive_ccache_flush_range(vm_paddr_t paddr, size_t len)
 {
-	vm_offset_t paddr;
-	vm_offset_t sva;
-	vm_offset_t step;
 	uint64_t line;
 
 	if (ccache_va == NULL || len == 0)
@@ -91,30 +73,26 @@ ccache_flush_range(vm_offset_t start, size_t len)
 
 	mb();
 
-	for (sva = start; len > 0;) {
-		paddr = pmap_kextract(sva);
-		step = min(PAGE_SIZE - (paddr & PAGE_MASK), len);
-		for (line = rounddown2(paddr, SIFIVE_CCACHE_LINE_SIZE);
-		    line < paddr + step;
-		    line += SIFIVE_CCACHE_LINE_SIZE)
-			CC_WR8(SIFIVE_CCACHE_FLUSH64, line);
-		sva += step;
-		len -= step;
-	}
+	for (line = rounddown2(paddr, SIFIVE_CCACHE_LINE_SIZE);
+	    line < paddr + len;
+	    line += SIFIVE_CCACHE_LINE_SIZE)
+		CC_WR8(SIFIVE_CCACHE_FLUSH64, line);
 
 	mb();
 }
 
-static void
-ccache_install_hooks(void)
+bool
+sifive_ccache_is_available(void)
 {
-	struct riscv_cache_ops eswin_ops;
 
-	eswin_ops.dcache_wbinv_range = ccache_flush_range;
-	eswin_ops.dcache_inv_range = ccache_flush_range;
-	eswin_ops.dcache_wb_range = ccache_flush_range;
+	return (ccache_probed);
+}
 
-	riscv_cache_install_hooks(&eswin_ops, SIFIVE_CCACHE_LINE_SIZE);
+uint64_t
+sifive_ccache_uncached_offset(void)
+{
+
+	return (ccache_uncached_offset);
 }
 
 static int
@@ -139,7 +117,9 @@ static int
 ccache_attach(device_t dev)
 {
 	struct ccache_softc *sc;
+	phandle_t node;
 	size_t config, ways;
+	pcell_t cells[2];
 
 	sc = device_get_softc(dev);
 
@@ -148,19 +128,30 @@ ccache_attach(device_t dev)
 		return (ENXIO);
 	}
 
-	/* Non-standard EIC7700 cache unit configuration. */
 	config = RD8(sc, SIFIVE_CCACHE_CONFIG);
 	ways = (config & CCACHE_CONFIG_WAYS_M) >> CCACHE_CONFIG_WAYS_S;
 	WR8(sc, SIFIVE_CCACHE_WAYENABLE, (ways - 1));
 
 	ccache_va = rman_get_virtual(sc->res);
-	ccache_install_hooks();
+
+	node = ofw_bus_get_node(dev);
+	if (OF_getencprop(node, "uncached-offset", (pcell_t *)cells,
+	    sizeof(cells)) == sizeof(cells)) {
+		ccache_uncached_offset =
+		    ((uint64_t)cells[0] << 32) | cells[1];
+		device_printf(dev, "uncached-offset: 0x%lx\n",
+		    (unsigned long)ccache_uncached_offset);
+	}
+
+	ccache_probed = true;
+
+	device_printf(dev, "L2 cache: %zu ways, line %d bytes\n",
+	    ways, SIFIVE_CCACHE_LINE_SIZE);
 
 	return (0);
 }
 
 static device_method_t ccache_methods[] = {
-	/* Device interface */
 	DEVMETHOD(device_probe,		ccache_probe),
 	DEVMETHOD(device_attach,	ccache_attach),
 	DEVMETHOD_END
