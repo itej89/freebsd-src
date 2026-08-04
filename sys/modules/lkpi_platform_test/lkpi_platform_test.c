@@ -8,6 +8,8 @@
  * the JH7110 TRNG (unclaimed DT node).
  */
 
+#include "opt_platform.h"
+
 #include <linux/module.h>
 #include <linux/platform_device.h>
 #include <linux/of.h>
