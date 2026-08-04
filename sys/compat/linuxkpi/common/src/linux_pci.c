@@ -1592,7 +1592,7 @@ linux_dma_trie_free(struct pctrie *ptree, void *node)
 PCTRIE_DEFINE(LINUX_DMA, linux_dma_obj, dma_addr, linux_dma_trie_alloc,
     linux_dma_trie_free);
 
-#if defined(__i386__) || defined(__amd64__) || defined(__aarch64__)
+#if defined(__i386__) || defined(__amd64__) || defined(__aarch64__) || defined(__riscv)
 static dma_addr_t
 linux_dma_map_phys_common(struct device *dev, vm_paddr_t phys, size_t len,
     bus_dma_tag_t dmat)
@@ -1609,9 +1609,14 @@ linux_dma_map_phys_common(struct device *dev, vm_paddr_t phys, size_t len,
 	 * physical address, short-circuit the remainder of the
 	 * bus_dma API.  This avoids tracking collisions in the pctrie
 	 * with the additional benefit of reducing overhead.
+	 *
+	 * Skip on RISC-V: non-coherent platforms need the full busdma
+	 * path so that bus_dmamap_sync performs cache maintenance.
 	 */
+#if !defined(__riscv)
 	if (bus_dma_id_mapped(dmat, phys, len))
 		return (phys);
+#endif
 
 	obj = uma_zalloc(linux_dma_obj_zone, M_NOWAIT);
 	if (obj == NULL) {
@@ -1691,7 +1696,7 @@ linux_dma_map_phys(struct device *dev, vm_paddr_t phys, size_t len)
 	return (lkpi_dma_map_phys(dev, phys, len, DMA_NONE, 0));
 }
 
-#if defined(__i386__) || defined(__amd64__) || defined(__aarch64__)
+#if defined(__i386__) || defined(__amd64__) || defined(__aarch64__) || defined(__riscv)
 void
 lkpi_dma_unmap(struct device *dev, dma_addr_t dma_addr, size_t len,
     enum dma_data_direction direction, unsigned long attrs)
@@ -1775,8 +1780,13 @@ linux_dma_alloc_coherent(struct device *dev, size_t size,
 	align = PAGE_SIZE << get_order(size);
 	/* Always zero the allocation. */
 	flag |= M_ZERO;
+#if defined(__riscv)
+	mem = kmem_alloc_contig(size, flag & GFP_NATIVE_MASK, 0, high,
+	    align, 0, VM_MEMATTR_UNCACHEABLE);
+#else
 	mem = kmem_alloc_contig(size, flag & GFP_NATIVE_MASK, 0, high,
 	    align, 0, VM_MEMATTR_DEFAULT);
+#endif
 	if (mem != NULL) {
 		*dma_handle = linux_dma_map_phys_common(dev, vtophys(mem), size,
 		    priv->dmat_coherent);
