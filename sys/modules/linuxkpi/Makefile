@@ -49,7 +49,8 @@ SRCS+=	opt_apic.h
 
 SRCS+=	opt_ddb.h
 SRCS+=	opt_fdt.h opt_platform.h
-SRCS+=	linux_platform.c linux_clk.c linux_reset.c linux_regmap.c
+SRCS+=	linux_platform.c linux_clk.c linux_reset.c linux_regmap.c \
+	linux_component.c
 SRCS+=	ofw_bus_if.h ofw_if.h
 SRCS+=	${LINUXKPI_GENSRCS}
 
