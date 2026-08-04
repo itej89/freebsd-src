@@ -1791,6 +1791,8 @@ dev/hwpmc/hwpmc_soft.c		optional hwpmc
 dev/hwreset/hwreset.c		optional hwreset
 dev/hwreset/hwreset_array.c	optional hwreset
 dev/hwreset/hwreset_if.m	optional hwreset
+dev/pwrdom/pwrdom.c		optional pwrdom
+dev/pwrdom/pwrdom_if.m		optional pwrdom
 dev/hwt/hwt.c			optional hwt
 dev/hwt/hwt_backend.c		optional hwt
 dev/hwt/hwt_config.c		optional hwt

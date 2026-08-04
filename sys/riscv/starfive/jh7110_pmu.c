@@ -30,7 +30,11 @@
 #include <dev/ofw/ofw_bus.h>
 #include <dev/ofw/ofw_bus_subr.h>
 
+#include <dev/pwrdom/pwrdom.h>
+
 #include <dt-bindings/power/starfive,jh7110-pmu.h>
+
+#include "pwrdom_if.h"
 
 /* PMU registers */
 #define	PMU_SW_TURN_ON		0x0C
@@ -104,6 +108,36 @@ jh7110_pmu_set_domain(struct jh7110_pmu_softc *sc, uint32_t domain, bool on)
 }
 
 static int
+jh7110_pmu_pwrdom_enable(device_t dev, intptr_t id)
+{
+	struct jh7110_pmu_softc *sc;
+
+	sc = device_get_softc(dev);
+	return (jh7110_pmu_set_domain(sc, (uint32_t)id, true));
+}
+
+static int
+jh7110_pmu_pwrdom_disable(device_t dev, intptr_t id)
+{
+	struct jh7110_pmu_softc *sc;
+
+	sc = device_get_softc(dev);
+	return (jh7110_pmu_set_domain(sc, (uint32_t)id, false));
+}
+
+static int
+jh7110_pmu_pwrdom_is_enabled(device_t dev, intptr_t id, bool *value)
+{
+	struct jh7110_pmu_softc *sc;
+	uint32_t status;
+
+	sc = device_get_softc(dev);
+	status = RD4(sc, PMU_CURR_POWER_MODE);
+	*value = (status & (1 << (uint32_t)id)) != 0;
+	return (0);
+}
+
+static int
 jh7110_pmu_probe(device_t dev)
 {
 
@@ -157,6 +191,8 @@ jh7110_pmu_attach(device_t dev)
 			device_printf(dev, "GPU power domain enabled\n");
 	}
 
+	pwrdom_register_ofw_provider(dev);
+
 	return (0);
 }
 
@@ -178,6 +214,10 @@ static device_method_t jh7110_pmu_methods[] = {
 	DEVMETHOD(device_probe,		jh7110_pmu_probe),
 	DEVMETHOD(device_attach,	jh7110_pmu_attach),
 	DEVMETHOD(device_detach,	jh7110_pmu_detach),
+
+	DEVMETHOD(pwrdom_enable,	jh7110_pmu_pwrdom_enable),
+	DEVMETHOD(pwrdom_disable,	jh7110_pmu_pwrdom_disable),
+	DEVMETHOD(pwrdom_is_enabled,	jh7110_pmu_pwrdom_is_enabled),
 
 	DEVMETHOD_END,
 };
