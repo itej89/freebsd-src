@@ -17,6 +17,7 @@
 #include <linux/clk.h>
 #include <linux/reset.h>
 #include <linux/property.h>
+#include <linux/regmap.h>
 #include <linux/io.h>
 
 static const struct of_device_id lkpi_test_of_match[] = {
@@ -115,6 +116,31 @@ lkpi_test_probe(struct platform_device *pdev)
 		pr_info("lkpi_test: T9 PASS - interrupts = %u\n", val);
 	else
 		pr_info("lkpi_test: T9 INFO - no 'interrupts' property\n");
+
+	/* Test 10: regmap */
+	{
+		static const struct regmap_config rmap_cfg = {
+			.reg_bits = 32,
+			.val_bits = 32,
+			.reg_stride = 4,
+		};
+		struct regmap *rmap;
+		unsigned int rval;
+
+		rmap = devm_regmap_init_mmio(&pdev->dev, base, &rmap_cfg);
+		if (!IS_ERR(rmap)) {
+			error = regmap_read(rmap, 0, &rval);
+			if (error == 0)
+				pr_info("lkpi_test: T10 PASS - regmap_read(0) = 0x%08x\n",
+				    rval);
+			else
+				pr_info("lkpi_test: T10 FAIL - regmap_read error %d\n",
+				    error);
+		} else {
+			pr_info("lkpi_test: T10 FAIL - regmap_init error %ld\n",
+			    PTR_ERR(rmap));
+		}
+	}
 
 	pr_info("lkpi_test: ALL TESTS COMPLETE\n");
 	return (0);
