@@ -50,6 +50,8 @@ struct pcb {
 	uint64_t	pcb_fpflags;	/* Floating point flags */
 #define	PCB_FP_STARTED	0x1
 #define	PCB_FP_USERMASK	0x1
+#define	PCB_FP_KERN	0x2
+#define	PCB_FP_NOSAVE	0x4
 	vm_offset_t	pcb_onfault;	/* Copyinout fault handler */
 };
 
