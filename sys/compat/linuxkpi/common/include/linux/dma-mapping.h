@@ -303,44 +303,33 @@ dma_sync_single_for_device(struct device *dev, dma_addr_t dma,
 	linuxkpi_dma_sync(dev, dma, size, op);
 }
 
+/* (20250329) These four seem to be unused code. */
 static inline void
 dma_sync_sg_for_cpu(struct device *dev, struct scatterlist *sg, int nelems,
     enum dma_data_direction direction)
 {
-	struct scatterlist *s;
-	int i;
-
-	for_each_sg(sg, s, nelems, i)
-		dma_sync_single_for_cpu(dev, sg_dma_address(s),
-		    sg_dma_len(s), direction);
+	pr_debug("%s:%d: TODO dir %d\n", __func__, __LINE__, direction);
 }
 
 static inline void
 dma_sync_sg_for_device(struct device *dev, struct scatterlist *sg, int nelems,
     enum dma_data_direction direction)
 {
-	struct scatterlist *s;
-	int i;
-
-	for_each_sg(sg, s, nelems, i)
-		dma_sync_single_for_device(dev, sg_dma_address(s),
-		    sg_dma_len(s), direction);
+	pr_debug("%s:%d: TODO dir %d\n", __func__, __LINE__, direction);
 }
 
 static inline void
 dma_sync_single_range_for_cpu(struct device *dev, dma_addr_t dma_handle,
     unsigned long offset, size_t size, enum dma_data_direction direction)
 {
-
-	dma_sync_single_for_cpu(dev, dma_handle + offset, size, direction);
+	pr_debug("%s:%d: TODO dir %d\n", __func__, __LINE__, direction);
 }
 
 static inline void
 dma_sync_single_range_for_device(struct device *dev, dma_addr_t dma_handle,
     unsigned long offset, size_t size, enum dma_data_direction direction)
 {
-
-	dma_sync_single_for_device(dev, dma_handle + offset, size, direction);
+	pr_debug("%s:%d: TODO dir %d\n", __func__, __LINE__, direction);
 }
 
 #define	DMA_MAPPING_ERROR	(~(dma_addr_t)0)
