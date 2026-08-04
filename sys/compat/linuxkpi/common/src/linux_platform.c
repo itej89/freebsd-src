@@ -127,6 +127,20 @@ linux_platform_attach(device_t dev)
 	np->full_name = pdrv->driver.name;
 	pdev->dev.of_node = np;
 
+	/* Check dma-coherent property (walk up DT tree) */
+	{
+		phandle_t n = pdev->node;
+
+		pdev->dev.dma_coherent = false;
+		while (n > 0) {
+			if (OF_hasprop(n, "dma-coherent")) {
+				pdev->dev.dma_coherent = true;
+				break;
+			}
+			n = OF_parent(n);
+		}
+	}
+
 	/* Auto-attach power domain if present in DT */
 	{
 		pwrdom_t pd;

@@ -121,6 +121,7 @@ struct device {
 	void		(*release)(struct device *dev);
 	struct kobject	kobj;
 	void		*dma_priv;
+	bool		dma_coherent;
 	void		*driver_data;
 	unsigned int	irq;
 #define	LINUX_IRQ_INVALID	65535
