@@ -55,6 +55,7 @@
 #include <machine/bus.h>
 #include <machine/md_var.h>
 #include <machine/bus_dma_impl.h>
+#include <riscv/sifive/sifive_ccache.h>
 
 #define MAX_BPAGES 4096
 
@@ -798,16 +799,6 @@ dma_dcache_sync(struct sync_list *sl, bus_dmasync_op_t op)
 			cpu_dcache_wb_range(va, len);
 			break;
 		case BUS_DMASYNC_PREREAD:
-			/*
-			 * An mbuf may start in the middle of a cacheline. There
-			 * will be no cpu writes to the beginning of that line
-			 * (which contains the mbuf header) while dma is in
-			 * progress.  Handle that case by doing a writeback of
-			 * just the first cacheline before invalidating the
-			 * overall buffer.  Any mbuf in a chain may have this
-			 * misalignment.  Buffers which are not mbufs bounce if
-			 * they are not aligned to a cacheline.
-			 */
 			dma_preread_safe(va, len);
 			break;
 		case BUS_DMASYNC_POSTREAD:
@@ -818,6 +809,9 @@ dma_dcache_sync(struct sync_list *sl, bus_dmasync_op_t op)
 			panic("unsupported combination of sync operations: "
                               "0x%08x\n", op);
 		}
+
+		/* Flush L2 cache for non-coherent DMA */
+		sifive_ccache_flush_range(pa, len);
 
 		if (tempva != 0)
 			pmap_quick_remove_page(tempva);
