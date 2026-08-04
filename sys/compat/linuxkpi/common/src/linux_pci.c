@@ -50,6 +50,10 @@
 
 #include <machine/bus.h>
 #include <machine/resource.h>
+#if defined(__riscv)
+#include <machine/cpufunc.h>
+#include <riscv/sifive/sifive_ccache.h>
+#endif
 
 #include <dev/pci/pcivar.h>
 #include <dev/pci/pci_private.h>
@@ -1743,6 +1747,12 @@ void
 lkpi_dma_unmap(struct device *dev, dma_addr_t dma_addr, size_t len,
     enum dma_data_direction direction, unsigned long attrs)
 {
+#if defined(__riscv)
+	if ((attrs & DMA_ATTR_SKIP_CPU_SYNC) == 0) {
+		cpu_dcache_wbinv_range(PHYS_TO_DMAP(dma_addr), len);
+		sifive_ccache_flush_range(dma_addr, len);
+	}
+#endif
 }
 #endif
 
@@ -1879,13 +1889,22 @@ linuxkpi_dma_sync(struct device *dev, dma_addr_t dma_addr, size_t size,
 
 	priv = dev->dma_priv;
 
-	if (pctrie_is_empty(&priv->ptree))
+	if (pctrie_is_empty(&priv->ptree)) {
+#if defined(__riscv)
+		cpu_dcache_wbinv_range(PHYS_TO_DMAP(dma_addr), size);
+		sifive_ccache_flush_range(dma_addr, size);
+#endif
 		return;
+	}
 
 	DMA_PRIV_LOCK(priv);
 	obj = LINUX_DMA_PCTRIE_LOOKUP(&priv->ptree, dma_addr);
 	if (obj == NULL) {
 		DMA_PRIV_UNLOCK(priv);
+#if defined(__riscv)
+		cpu_dcache_wbinv_range(PHYS_TO_DMAP(dma_addr), size);
+		sifive_ccache_flush_range(dma_addr, size);
+#endif
 		return;
 	}
 
