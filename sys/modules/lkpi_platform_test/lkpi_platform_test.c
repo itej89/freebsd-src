@@ -245,40 +245,36 @@ lkpi_test_probe(struct platform_device *pdev)
 			pr_info("lkpi_test: T11 PASS - component: unbind+del clean\n");
 	}
 
-	/* Test 12: Power domain framework */
+	/* Test 12: Power domain framework
+	 * Use the VOUT clock controller node which consumes
+	 * power-domains = <&pwrc JH7110_PD_VOUT>.
+	 * The PMU already enabled VOUT at boot.
+	 */
 #ifdef FDT
 	{
-		phandle_t pmu_node;
+		phandle_t vout_node;
 		pwrdom_t pd;
 		bool enabled;
 
-		pmu_node = OF_finddevice("/soc/power-controller");
-		if (pmu_node <= 0)
-			pmu_node = OF_finddevice("/soc/power-controller@17030000");
-
-		if (pmu_node > 0) {
-			/*
-			 * Get GPU power domain (id=2) from the PMU.
-			 * The PMU already enabled it at boot — verify
-			 * the framework can query its status.
-			 */
+		vout_node = OF_finddevice("/soc/clock-controller@295c0000");
+		if (vout_node > 0) {
 			error = pwrdom_get_by_ofw_idx(pdev->dev.bsddev,
-			    pmu_node, 0, &pd);
+			    vout_node, 0, &pd);
 			if (error == 0) {
 				error = pwrdom_is_enabled(pd, &enabled);
 				if (error == 0)
-					pr_info("lkpi_test: T12 PASS - pwrdom query ok, enabled=%d\n",
+					pr_info("lkpi_test: T12 PASS - pwrdom VOUT enabled=%d\n",
 					    enabled);
 				else
 					pr_info("lkpi_test: T12 FAIL - pwrdom_is_enabled error %d\n",
 					    error);
 				pwrdom_release(pd);
 			} else {
-				pr_info("lkpi_test: T12 INFO - pwrdom_get error %d (PMU may not have power-domains property)\n",
+				pr_info("lkpi_test: T12 FAIL - pwrdom_get error %d\n",
 				    error);
 			}
 		} else {
-			pr_info("lkpi_test: T12 INFO - PMU node not found in DT\n");
+			pr_info("lkpi_test: T12 INFO - voutcrg node not found\n");
 		}
 	}
 #endif
