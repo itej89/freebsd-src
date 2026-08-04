@@ -1592,7 +1592,7 @@ linux_dma_trie_free(struct pctrie *ptree, void *node)
 PCTRIE_DEFINE(LINUX_DMA, linux_dma_obj, dma_addr, linux_dma_trie_alloc,
     linux_dma_trie_free);
 
-#if defined(__i386__) || defined(__amd64__) || defined(__aarch64__) || defined(__riscv)
+#if defined(__i386__) || defined(__amd64__) || defined(__aarch64__)
 static dma_addr_t
 linux_dma_map_phys_common(struct device *dev, vm_paddr_t phys, size_t len,
     bus_dma_tag_t dmat)
@@ -1610,13 +1610,8 @@ linux_dma_map_phys_common(struct device *dev, vm_paddr_t phys, size_t len,
 	 * bus_dma API.  This avoids tracking collisions in the pctrie
 	 * with the additional benefit of reducing overhead.
 	 */
-#if defined(__riscv)
-	/* No IOMMU on RISC-V SoCs — all DMA is identity-mapped. */
-	return (phys);
-#else
 	if (bus_dma_id_mapped(dmat, phys, len))
 		return (phys);
-#endif
 
 	obj = uma_zalloc(linux_dma_obj_zone, M_NOWAIT);
 	if (obj == NULL) {
@@ -1696,7 +1691,7 @@ linux_dma_map_phys(struct device *dev, vm_paddr_t phys, size_t len)
 	return (lkpi_dma_map_phys(dev, phys, len, DMA_NONE, 0));
 }
 
-#if defined(__i386__) || defined(__amd64__) || defined(__aarch64__) || defined(__riscv)
+#if defined(__i386__) || defined(__amd64__) || defined(__aarch64__)
 void
 lkpi_dma_unmap(struct device *dev, dma_addr_t dma_addr, size_t len,
     enum dma_data_direction direction, unsigned long attrs)
