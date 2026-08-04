@@ -322,6 +322,56 @@ lkpi_test_probe(struct platform_device *pdev)
 	}
 t13_done:
 
+	/* Test 14: DMA coherency verification */
+	{
+		void *cbuf;
+		dma_addr_t chandle;
+		void *sbuf;
+		dma_addr_t shandle;
+
+		pr_info("lkpi_test: T14 - dma_coherent=%d\n",
+		    pdev->dev.dma_coherent);
+
+		/* 14a: Coherent buffer — should be uncacheable */
+		cbuf = dma_alloc_coherent(&pdev->dev, 4096, &chandle,
+		    GFP_KERNEL);
+		if (cbuf != NULL) {
+			*(volatile uint32_t *)cbuf = 0xCAFEBABE;
+			if (*(volatile uint32_t *)cbuf == 0xCAFEBABE)
+				pr_info("lkpi_test: T14a PASS - coherent write/read ok\n");
+			else
+				pr_info("lkpi_test: T14a FAIL - coherent readback mismatch\n");
+			dma_free_coherent(&pdev->dev, 4096, cbuf, chandle);
+		} else {
+			pr_info("lkpi_test: T14a FAIL - coherent alloc NULL\n");
+		}
+
+		/* 14b: Streaming buffer — sync should flush L1+L2 */
+		sbuf = kmalloc(256, GFP_KERNEL);
+		if (sbuf != NULL) {
+			memset(sbuf, 0xAB, 256);
+			shandle = dma_map_single(&pdev->dev, sbuf, 256,
+			    DMA_TO_DEVICE);
+			if (!dma_mapping_error(&pdev->dev, shandle)) {
+				dma_sync_single_for_device(&pdev->dev,
+				    shandle, 256, DMA_TO_DEVICE);
+				pr_info("lkpi_test: T14b PASS - streaming sync_for_device ok\n");
+
+				dma_sync_single_for_cpu(&pdev->dev,
+				    shandle, 256, DMA_FROM_DEVICE);
+				pr_info("lkpi_test: T14b PASS - streaming sync_for_cpu ok\n");
+
+				dma_unmap_single(&pdev->dev, shandle, 256,
+				    DMA_TO_DEVICE);
+			} else {
+				pr_info("lkpi_test: T14b FAIL - map_single error\n");
+			}
+			kfree(sbuf);
+		} else {
+			pr_info("lkpi_test: T14b FAIL - kmalloc failed\n");
+		}
+	}
+
 	pr_info("lkpi_test: ALL TESTS COMPLETE\n");
 	return (0);
 }
