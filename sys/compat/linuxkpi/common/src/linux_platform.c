@@ -141,7 +141,7 @@ linux_platform_attach(device_t dev)
 	{
 		struct linux_dma_priv *priv;
 
-		priv = kmalloc(sizeof(*priv), GFP_KERNEL);
+		priv = kzalloc(sizeof(*priv), GFP_KERNEL);
 		if (priv != NULL) {
 			mtx_init(&priv->lock, "lkpi-plat-dma", NULL, MTX_DEF);
 			pctrie_init(&priv->ptree);
