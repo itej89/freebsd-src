@@ -18,7 +18,61 @@
 #include <linux/reset.h>
 #include <linux/property.h>
 #include <linux/regmap.h>
+#include <linux/component.h>
 #include <linux/io.h>
+
+/* Component framework test helpers */
+static bool comp_bind_called;
+static bool comp_unbind_called;
+static bool master_bind_called;
+static bool master_unbind_called;
+
+static int
+lkpi_test_comp_bind(struct device *comp, struct device *master, void *data)
+{
+	comp_bind_called = true;
+	return (0);
+}
+
+static void
+lkpi_test_comp_unbind(struct device *comp, struct device *master, void *data)
+{
+	comp_unbind_called = true;
+}
+
+static const struct component_ops lkpi_test_comp_ops = {
+	.bind	= lkpi_test_comp_bind,
+	.unbind	= lkpi_test_comp_unbind,
+};
+
+static int
+lkpi_test_master_bind(struct device *dev)
+{
+	int error;
+
+	error = component_bind_all(dev, NULL);
+	if (error == 0)
+		master_bind_called = true;
+	return (error);
+}
+
+static void
+lkpi_test_master_unbind(struct device *dev)
+{
+	component_unbind_all(dev, NULL);
+	master_unbind_called = true;
+}
+
+static const struct component_master_ops lkpi_test_master_ops = {
+	.bind	= lkpi_test_master_bind,
+	.unbind	= lkpi_test_master_unbind,
+};
+
+static int
+lkpi_test_comp_compare(struct device *dev, void *data)
+{
+	return (dev == (struct device *)data);
+}
 
 static const struct of_device_id lkpi_test_of_match[] = {
 	{ .compatible = "starfive,jh7110-trng", .data = (void *)0xCAFE },
@@ -140,6 +194,51 @@ lkpi_test_probe(struct platform_device *pdev)
 			pr_info("lkpi_test: T10 FAIL - regmap_init error %ld\n",
 			    PTR_ERR(rmap));
 		}
+	}
+
+	/* Test 11: Component framework self-test */
+	{
+		struct component_match *match = NULL;
+		bool t11_pass = true;
+
+		comp_bind_called = false;
+		comp_unbind_called = false;
+		master_bind_called = false;
+		master_unbind_called = false;
+
+		/* Register our device as a component */
+		error = component_add(&pdev->dev, &lkpi_test_comp_ops);
+		if (error != 0) {
+			pr_info("lkpi_test: T11 FAIL - component_add error %d\n",
+			    error);
+			t11_pass = false;
+		}
+
+		/* Build match list that matches our own device */
+		component_match_add(&pdev->dev, &match,
+		    lkpi_test_comp_compare, &pdev->dev);
+
+		/* Register as master — should trigger bind immediately */
+		error = component_master_add_with_match(&pdev->dev,
+		    &lkpi_test_master_ops, match);
+		if (error != 0) {
+			pr_info("lkpi_test: T11 FAIL - master_add error %d\n",
+			    error);
+			t11_pass = false;
+		}
+
+		if (t11_pass && master_bind_called && comp_bind_called)
+			pr_info("lkpi_test: T11 PASS - component: add->match->bind all fired\n");
+		else if (t11_pass)
+			pr_info("lkpi_test: T11 FAIL - master_bind=%d comp_bind=%d\n",
+			    master_bind_called, comp_bind_called);
+
+		/* Cleanup */
+		component_master_del(&pdev->dev, &lkpi_test_master_ops);
+		component_del(&pdev->dev, &lkpi_test_comp_ops);
+
+		if (t11_pass && master_unbind_called && comp_unbind_called)
+			pr_info("lkpi_test: T11 PASS - component: unbind+del clean\n");
 	}
 
 	pr_info("lkpi_test: ALL TESTS COMPLETE\n");
