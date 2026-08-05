@@ -298,22 +298,15 @@ platform_get_resource(struct platform_device *pdev, unsigned int type,
 int
 platform_get_irq(struct platform_device *pdev, unsigned int index)
 {
-	struct resource *bsd_res;
+	rman_res_t start;
 	int rid;
 
 	rid = index;
-	bsd_res = bus_alloc_resource_any(pdev->dev.bsddev, SYS_RES_IRQ,
-	    &rid, RF_ACTIVE | RF_SHAREABLE);
-	if (bsd_res == NULL)
+	if (bus_get_resource(pdev->dev.bsddev, SYS_RES_IRQ, rid,
+	    &start, NULL) != 0)
 		return (-ENXIO);
 
-	if (pdev->bsd_nres < LKPI_PLATFORM_MAX_RES) {
-		pdev->bsd_res[pdev->bsd_nres] = bsd_res;
-		pdev->bsd_rid[pdev->bsd_nres] = rid;
-		pdev->bsd_nres++;
-	}
-
-	return (rman_get_start(bsd_res));
+	return ((int)start);
 }
 
 void __iomem *
