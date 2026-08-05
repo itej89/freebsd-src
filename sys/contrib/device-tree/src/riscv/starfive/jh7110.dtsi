@@ -1136,8 +1136,17 @@
 		gpu: gpu@18000000 {
 			compatible = "img,img-rogue";
 			reg = <0x0 0x18000000 0x0 0x100000>;
-			clocks = <&syscrg JH7110_SYSCLK_GPU_CORE_CLK>;
-			clock-names = "core";
+			clocks = <&syscrg JH7110_SYSCLK_GPU_CORE_CLK>,
+				 <&syscrg JH7110_SYSCLK_GPU_SYS_CLK>,
+				 <&syscrg JH7110_SYSCLK_GPU_APB>,
+				 <&syscrg JH7110_SYSCLK_GPU_RTC_TOGGLE>,
+				 <&syscrg JH7110_SYSCLK_GPU_CORE>,
+				 <&syscrg JH7110_SYSCLK_NOC_BUS_GPU_AXI>;
+			clock-names = "core", "sys", "apb",
+				      "rtc", "div", "axi";
+			resets = <&syscrg JH7110_SYSRST_GPU_APB>,
+				 <&syscrg JH7110_SYSRST_GPU_DOMA>;
+			reset-names = "apb", "doma";
 			power-domains = <&pwrc JH7110_PD_GPUA>;
 			interrupts = <82>;
 			status = "okay";
