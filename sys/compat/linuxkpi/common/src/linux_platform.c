@@ -117,6 +117,8 @@ linux_platform_attach(device_t dev)
 
 	pdev->dev.driver = &pdrv->driver;
 	pdev->dev.parent = &linux_root_device;
+	kobject_init(&pdev->dev.kobj, &linux_dev_ktype);
+	kobject_set_name(&pdev->dev.kobj, "%s", device_get_nameunit(dev));
 
 	pdev->node = ofw_bus_get_node(dev);
 
