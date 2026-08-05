@@ -122,6 +122,8 @@ lkpi_request_irq(struct device *xdev, unsigned int irq,
 	int rid;
 
 	dev = lkpi_pci_find_irq_dev(irq);
+	if (dev == NULL && xdev != NULL)
+		dev = xdev;
 	if (dev == NULL)
 		return -ENXIO;
 	if (xdev != NULL && xdev != dev)
