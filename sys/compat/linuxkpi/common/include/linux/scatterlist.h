@@ -42,6 +42,7 @@
 #include <linux/mm.h>
 
 struct bus_dmamap;
+struct bus_dma_tag;
 struct scatterlist {
 	unsigned long page_link;
 #define	SG_PAGE_LINK_CHAIN	0x1UL
@@ -51,6 +52,7 @@ struct scatterlist {
 	unsigned int length;
 	dma_addr_t dma_address;
 	struct bus_dmamap *dma_map;	/* FreeBSD specific */
+	struct bus_dma_tag *dma_sg_tag;	/* FreeBSD: per-SG-map child tag */
 };
 
 CTASSERT((sizeof(struct scatterlist) & SG_PAGE_LINK_MASK) == 0);

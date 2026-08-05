@@ -1922,27 +1922,56 @@ linux_dma_map_sg_attrs(struct device *dev, struct scatterlist *sgl, int nents,
 {
 	struct linux_dma_priv *priv;
 	struct scatterlist *sg;
-	int i, nseg;
+	bus_dma_tag_t sg_tag;
+	int i, nseg, error;
 	bus_dma_segment_t seg;
 
 	priv = dev->dma_priv;
 
 	DMA_PRIV_LOCK(priv);
 
-	/* create common DMA map in the first S/G entry */
-	if (bus_dmamap_create(priv->dmat, 0, &sgl->dma_map) != 0) {
+	/*
+	 * Create a child DMA tag sized to the number of SG entries.
+	 * On architectures with non-coherent DMA (e.g. RISC-V, ARM),
+	 * busdma allocates a per-map sync_list[nsegments] for cache
+	 * maintenance tracking.  The parent tag has nsegments=1 which
+	 * is sufficient for single-buffer operations but not for
+	 * scatter-gather lists with multiple entries.
+	 */
+	error = bus_dma_tag_create(priv->dmat,
+	    1, 0,			/* alignment, boundary */
+	    BUS_SPACE_MAXADDR,		/* lowaddr */
+	    BUS_SPACE_MAXADDR,		/* highaddr */
+	    NULL, NULL,			/* filtfunc, filtfuncarg */
+	    BUS_SPACE_MAXSIZE,		/* maxsize */
+	    nents,			/* nsegments */
+	    BUS_SPACE_MAXSIZE,		/* maxsegsz */
+	    0,				/* flags */
+	    NULL, NULL,			/* lockfunc, lockfuncarg */
+	    &sg_tag);
+	if (error != 0) {
 		DMA_PRIV_UNLOCK(priv);
 		return (0);
 	}
 
+	/* create common DMA map in the first S/G entry */
+	if (bus_dmamap_create(sg_tag, 0, &sgl->dma_map) != 0) {
+		bus_dma_tag_destroy(sg_tag);
+		DMA_PRIV_UNLOCK(priv);
+		return (0);
+	}
+	sgl->dma_sg_tag = sg_tag;
+
 	/* load all S/G list entries */
 	for_each_sg(sgl, sg, nents, i) {
 		nseg = -1;
-		if (_bus_dmamap_load_phys(priv->dmat, sgl->dma_map,
+		if (_bus_dmamap_load_phys(sg_tag, sgl->dma_map,
 		    sg_phys(sg), sg->length, BUS_DMA_NOWAIT,
 		    &seg, &nseg) != 0) {
-			bus_dmamap_unload(priv->dmat, sgl->dma_map);
-			bus_dmamap_destroy(priv->dmat, sgl->dma_map);
+			bus_dmamap_unload(sg_tag, sgl->dma_map);
+			bus_dmamap_destroy(sg_tag, sgl->dma_map);
+			bus_dma_tag_destroy(sg_tag);
+			sgl->dma_sg_tag = NULL;
 			DMA_PRIV_UNLOCK(priv);
 			return (0);
 		}
@@ -1957,13 +1986,13 @@ linux_dma_map_sg_attrs(struct device *dev, struct scatterlist *sgl, int nents,
 
 	switch (direction) {
 	case DMA_BIDIRECTIONAL:
-		bus_dmamap_sync(priv->dmat, sgl->dma_map, BUS_DMASYNC_PREWRITE);
+		bus_dmamap_sync(sg_tag, sgl->dma_map, BUS_DMASYNC_PREWRITE);
 		break;
 	case DMA_TO_DEVICE:
-		bus_dmamap_sync(priv->dmat, sgl->dma_map, BUS_DMASYNC_PREREAD);
+		bus_dmamap_sync(sg_tag, sgl->dma_map, BUS_DMASYNC_PREREAD);
 		break;
 	case DMA_FROM_DEVICE:
-		bus_dmamap_sync(priv->dmat, sgl->dma_map, BUS_DMASYNC_PREWRITE);
+		bus_dmamap_sync(sg_tag, sgl->dma_map, BUS_DMASYNC_PREWRITE);
 		break;
 	default:
 		break;
@@ -1981,8 +2010,10 @@ linux_dma_unmap_sg_attrs(struct device *dev, struct scatterlist *sgl,
     unsigned long attrs)
 {
 	struct linux_dma_priv *priv;
+	bus_dma_tag_t sg_tag;
 
 	priv = dev->dma_priv;
+	sg_tag = sgl->dma_sg_tag ? sgl->dma_sg_tag : priv->dmat;
 
 	DMA_PRIV_LOCK(priv);
 
@@ -1991,22 +2022,26 @@ linux_dma_unmap_sg_attrs(struct device *dev, struct scatterlist *sgl,
 
 	switch (direction) {
 	case DMA_BIDIRECTIONAL:
-		bus_dmamap_sync(priv->dmat, sgl->dma_map, BUS_DMASYNC_POSTREAD);
-		bus_dmamap_sync(priv->dmat, sgl->dma_map, BUS_DMASYNC_PREREAD);
+		bus_dmamap_sync(sg_tag, sgl->dma_map, BUS_DMASYNC_POSTREAD);
+		bus_dmamap_sync(sg_tag, sgl->dma_map, BUS_DMASYNC_PREREAD);
 		break;
 	case DMA_TO_DEVICE:
-		bus_dmamap_sync(priv->dmat, sgl->dma_map, BUS_DMASYNC_POSTWRITE);
+		bus_dmamap_sync(sg_tag, sgl->dma_map, BUS_DMASYNC_POSTWRITE);
 		break;
 	case DMA_FROM_DEVICE:
-		bus_dmamap_sync(priv->dmat, sgl->dma_map, BUS_DMASYNC_POSTREAD);
+		bus_dmamap_sync(sg_tag, sgl->dma_map, BUS_DMASYNC_POSTREAD);
 		break;
 	default:
 		break;
 	}
 skip_sync:
 
-	bus_dmamap_unload(priv->dmat, sgl->dma_map);
-	bus_dmamap_destroy(priv->dmat, sgl->dma_map);
+	bus_dmamap_unload(sg_tag, sgl->dma_map);
+	bus_dmamap_destroy(sg_tag, sgl->dma_map);
+	if (sgl->dma_sg_tag != NULL) {
+		bus_dma_tag_destroy(sgl->dma_sg_tag);
+		sgl->dma_sg_tag = NULL;
+	}
 	DMA_PRIV_UNLOCK(priv);
 }
 

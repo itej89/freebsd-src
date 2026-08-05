@@ -411,8 +411,8 @@ dma_map_sgtable(struct device *dev, struct sg_table *sgt,
 	int nents;
 
 	nents = dma_map_sg_attrs(dev, sgt->sgl, sgt->nents, dir, attrs);
-	if (nents < 0)
-		return (nents);
+	if (nents <= 0)
+		return (nents < 0 ? nents : -ENOMEM);
 	sgt->nents = nents;
 	return (0);
 }
