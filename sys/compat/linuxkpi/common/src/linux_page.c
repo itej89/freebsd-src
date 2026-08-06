@@ -432,6 +432,35 @@ vmap(struct page **pages, unsigned int count, unsigned long flags, int prot)
 	if (off == 0)
 		return (NULL);
 	vmmap_add((void *)off, size);
+
+#if defined(__riscv)
+	{
+		extern uint64_t sifive_ccache_uncached_offset(void);
+		vm_memattr_t attr = pgprot2cachemode(prot);
+
+		if (attr == VM_MEMATTR_UNCACHEABLE ||
+		    attr == VM_MEMATTR_WRITE_COMBINING) {
+			uint64_t uc_off;
+			vm_offset_t va;
+			unsigned int i;
+
+			uc_off = sifive_ccache_uncached_offset();
+			if (uc_off != 0) {
+				va = off;
+				for (i = 0; i < count; i++) {
+					vm_paddr_t pa = VM_PAGE_TO_PHYS(pages[i]);
+
+					pmap_kenter(va, PAGE_SIZE, pa + uc_off,
+					    VM_MEMATTR_DEFAULT);
+					va += PAGE_SIZE;
+				}
+				pmap_invalidate_range(kernel_pmap, off, off + size);
+				return ((void *)off);
+			}
+		}
+	}
+#endif
+
 	pmap_qenter(off, pages, count);
 
 	return ((void *)off);
