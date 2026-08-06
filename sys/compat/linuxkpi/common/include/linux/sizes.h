@@ -62,13 +62,13 @@
 #define SZ_256M	(1024 * 1024 * 256)
 #define SZ_512M	(1024 * 1024 * 512)
 
-#define SZ_1G	(1024 * 1024 * 1024 * 1)
-#define SZ_2G	(1024 * 1024 * 1024 * 2)
-#define SZ_4G	(1024 * 1024 * 1024 * 4)
-#define SZ_8G	(1024 * 1024 * 1024 * 8)
-#define SZ_16G	(1024 * 1024 * 1024 * 16)
-#define SZ_32G	(1024 * 1024 * 1024 * 32)
+#define SZ_1G	(1UL * 1024 * 1024 * 1024)
+#define SZ_2G	(2UL * 1024 * 1024 * 1024)
+#define SZ_4G	(4ULL * 1024 * 1024 * 1024)
+#define SZ_8G	(8ULL * 1024 * 1024 * 1024)
+#define SZ_16G	(16ULL * 1024 * 1024 * 1024)
+#define SZ_32G	(32ULL * 1024 * 1024 * 1024)
 
-#define SZ_64T	(1024 * 1024 * 1024 * 1024 * 64)
+#define SZ_64T	(64ULL * 1024 * 1024 * 1024 * 1024)
 
 #endif
