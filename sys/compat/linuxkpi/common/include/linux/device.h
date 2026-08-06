@@ -429,28 +429,18 @@ device_initialize(struct device *dev)
 	device_t bsddev = NULL;
 	int unit = -1;
 
-	printf("device_initialize: dev=%p class=%p devt=0x%lx parent=%p\n",
-	    dev, dev->class, (unsigned long)dev->devt, dev->parent);
-
 	if (dev->devt) {
 		unit = MINOR(dev->devt);
-		printf("device_initialize: devt path, unit=%d class=%p bsdclass=%p\n",
-		    unit, dev->class,
-		    dev->class ? dev->class->bsdclass : NULL);
 		bsddev = devclass_get_device(dev->class->bsdclass, unit);
 		dev->bsddev_attached_here = false;
 	} else if (dev->parent == NULL) {
-		printf("device_initialize: no-parent path, class=%p\n", dev->class);
 		bsddev = devclass_get_device(dev->class->bsdclass, 0);
 		dev->bsddev_attached_here = false;
 	} else {
-		printf("device_initialize: parent path\n");
 		dev->bsddev_attached_here = true;
 	}
 
 	if (bsddev == NULL && dev->parent != NULL) {
-		printf("device_initialize: adding child, class_name=%s unit=%d\n",
-		    dev->class ? dev->class->kobj.name : "(null)", unit);
 		bsddev = device_add_child(dev->parent->bsddev,
 		    dev->class->kobj.name, unit);
 	}
@@ -459,7 +449,6 @@ device_initialize(struct device *dev)
 		device_set_softc(bsddev, dev);
 
 	dev->bsddev = bsddev;
-	printf("device_initialize: bsddev=%p\n", bsddev);
 	MPASS(dev->bsddev != NULL);
 	kobject_init(&dev->kobj, &linux_dev_ktype);
 
@@ -470,15 +459,11 @@ device_initialize(struct device *dev)
 static inline int
 device_add(struct device *dev)
 {
-	printf("device_add: dev=%p class=%p bsddev=%p devt=0x%lx name=%s\n",
-	    dev, dev->class, dev->bsddev, (unsigned long)dev->devt,
-	    dev_name(dev) ? dev_name(dev) : "(null)");
 	if (dev->bsddev != NULL) {
 		if (dev->devt == 0)
 			dev->devt = makedev(0, device_get_unit(dev->bsddev));
 	}
 	if (dev->class == NULL) {
-		printf("device_add: class is NULL, skipping kobject_add\n");
 		if (dev->groups)
 			return (sysfs_create_groups(&dev->kobj, dev->groups));
 		return (0);
