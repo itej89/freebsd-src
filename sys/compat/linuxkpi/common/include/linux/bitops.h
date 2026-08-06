@@ -71,15 +71,15 @@
 #define	hweight_long(x)	bitcountl(x)
 
 static inline int
-__ffs(int mask)
+__ffs(unsigned long mask)
 {
-	return (ffs(mask) - 1);
+	return (ffsl(mask) - 1);
 }
 
 static inline int
-__fls(int mask)
+__fls(unsigned long mask)
 {
-	return (fls(mask) - 1);
+	return (flsl(mask) - 1);
 }
 
 static inline int
