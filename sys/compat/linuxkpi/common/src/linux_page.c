@@ -39,6 +39,9 @@
 #include <sys/memrange.h>
 
 #include <machine/bus.h>
+#if defined(__riscv)
+#include <machine/cpufunc.h>
+#endif
 
 #include <vm/vm.h>
 #include <vm/pmap.h>
@@ -454,7 +457,7 @@ vmap(struct page **pages, unsigned int count, unsigned long flags, int prot)
 					    VM_MEMATTR_DEFAULT);
 					va += PAGE_SIZE;
 				}
-				pmap_invalidate_range(kernel_pmap, off, off + size);
+				sfence_vma();
 				return ((void *)off);
 			}
 		}
