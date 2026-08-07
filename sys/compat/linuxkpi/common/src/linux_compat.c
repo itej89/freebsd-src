@@ -500,7 +500,11 @@ linux_cdev_pager_populate(vm_object_t vm_obj, vm_pindex_t pidx, int fault_type,
 
 	/* get VM area structure */
 	vmap = linux_cdev_handle_find(vm_obj->handle);
-	MPASS(vmap != NULL);
+	if (vmap == NULL) {
+		printf("linux_cdev_pager_populate: handle=%p not found in vma list\n",
+		    vm_obj->handle);
+		return (VM_PAGER_BAD);
+	}
 	MPASS(vmap->vm_private_data == vm_obj->handle);
 
 	VM_OBJECT_WUNLOCK(vm_obj);
@@ -617,6 +621,9 @@ linux_cdev_pager_dtor(void *handle)
 
 	vmap = linux_cdev_handle_find(handle);
 	MPASS(vmap != NULL);
+
+	printf("linux_cdev_pager_dtor: removing vmap=%p handle=%p\n",
+	    vmap, handle);
 
 	/*
 	 * Remove handle before calling close operation to prevent
@@ -1360,12 +1367,18 @@ linux_file_mmap_single(struct file *fp, const struct file_operations *fop,
 		} else {
 			/* insert VM area structure into list */
 			TAILQ_INSERT_TAIL(&linux_vma_head, vmap, vm_entry);
+			printf("linux_file_mmap_single: inserted vmap=%p "
+			    "vm_private_data=%p vm_ops=%p\n",
+			    vmap, vmap->vm_private_data, vmap->vm_ops);
 			error = 0;
 			vm_no_fault = (vmap->vm_ops->fault == NULL);
 		}
 		rw_wunlock(&linux_vma_lock);
 
 		if (error != 0) {
+			printf("linux_file_mmap_single: reusing existing vmap "
+			    "for vm_private_data=%p (error=%d)\n",
+			    vm_private_data, error);
 			/* free allocated VM area struct */
 			linux_cdev_handle_free(vmap);
 			/* check for stale VM area struct */
