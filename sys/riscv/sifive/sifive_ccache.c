@@ -83,6 +83,21 @@ sifive_ccache_flush_range(vm_paddr_t paddr, size_t len)
 	mb();
 }
 
+void
+sifive_ccache_flush_all(void)
+{
+	/*
+	 * Flush entire 2MB L2 cache by iterating over all cache lines.
+	 * JH7110 L2: 2048 sets * 16 ways * 64B line = 2MB.
+	 * The FLUSH64 register accepts physical addresses; flushing
+	 * address range [0, 2M) covers all sets regardless of way.
+	 */
+	if (ccache_va == NULL)
+		return;
+
+	sifive_ccache_flush_range(0x40000000, 2 * 1024 * 1024);
+}
+
 bool
 sifive_ccache_is_available(void)
 {
