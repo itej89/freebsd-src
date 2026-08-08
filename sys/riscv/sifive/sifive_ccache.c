@@ -87,15 +87,24 @@ void
 sifive_ccache_flush_all(void)
 {
 	/*
-	 * Flush entire 2MB L2 cache by iterating over all cache lines.
+	 * Flush entire 2MB L2 cache.
 	 * JH7110 L2: 2048 sets * 16 ways * 64B line = 2MB.
-	 * The FLUSH64 register accepts physical addresses; flushing
-	 * address range [0, 2M) covers all sets regardless of way.
+	 * FLUSH64 flushes all ways for a given set. Since sets are
+	 * indexed by PA[16:6] (2048 sets * 64B = 128KB), we flush
+	 * 128KB worth of addresses starting from RAM base to cover
+	 * all 2048 sets. Each FLUSH64 evicts all 16 ways.
 	 */
 	if (ccache_va == NULL)
 		return;
 
-	sifive_ccache_flush_range(0x40000000, 2 * 1024 * 1024);
+	/*
+	 * First flush L1 dcache on this CPU using T-HEAD
+	 * DCACHE.CIALL (clean+invalidate all dcache lines).
+	 */
+	__asm __volatile(".long 0x0030000b" ::: "memory"); /* th.dcache.ciall */
+	__asm __volatile(".long 0x0190000b" ::: "memory"); /* th.sync.s */
+
+	sifive_ccache_flush_range(0x40000000, 128 * 1024);
 }
 
 bool

@@ -549,6 +549,7 @@ lkpi_vmf_insert_pfn_prot_locked(struct vm_area_struct *vma, unsigned long addr,
 	vm_page_t page;
 	vm_pindex_t pindex;
 
+
 	VM_OBJECT_ASSERT_WLOCKED(vm_obj);
 	vm_page_iter_init(&pages, vm_obj);
 	pindex = OFF_TO_IDX(addr - vma->vm_start);
