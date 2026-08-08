@@ -58,16 +58,39 @@ devm_reset_control_get_optional_shared(struct device *dev, const char *id)
 	return (lkpi_devm_reset_control_get_optional(dev, id));
 }
 
+struct reset_control_bulk_data {
+	const char *id;
+	struct reset_control *rstc;
+};
+
 static inline int
-reset_control_bulk_deassert(int num_rstcs, struct reset_control **rstcs)
+devm_reset_control_bulk_get_optional_shared(struct device *dev,
+    int num_rstcs, struct reset_control_bulk_data *rstcs)
+{
+	int i;
+
+	for (i = 0; i < num_rstcs; i++) {
+		rstcs[i].rstc = lkpi_devm_reset_control_get_optional(dev,
+		    rstcs[i].id);
+		if (IS_ERR(rstcs[i].rstc))
+			rstcs[i].rstc = NULL;
+	}
+	return (0);
+}
+
+static inline int
+reset_control_bulk_deassert(int num_rstcs, struct reset_control_bulk_data *rstcs)
 {
 	int i, error;
 
 	for (i = 0; i < num_rstcs; i++) {
-		error = lkpi_reset_control_deassert(rstcs[i]);
+		if (!rstcs[i].rstc)
+			continue;
+		error = lkpi_reset_control_deassert(rstcs[i].rstc);
 		if (error != 0) {
 			while (--i >= 0)
-				lkpi_reset_control_assert(rstcs[i]);
+				if (rstcs[i].rstc)
+					lkpi_reset_control_assert(rstcs[i].rstc);
 			return (error);
 		}
 	}
@@ -75,12 +98,13 @@ reset_control_bulk_deassert(int num_rstcs, struct reset_control **rstcs)
 }
 
 static inline int
-reset_control_bulk_assert(int num_rstcs, struct reset_control **rstcs)
+reset_control_bulk_assert(int num_rstcs, struct reset_control_bulk_data *rstcs)
 {
 	int i;
 
 	for (i = num_rstcs - 1; i >= 0; i--)
-		lkpi_reset_control_assert(rstcs[i]);
+		if (rstcs[i].rstc)
+			lkpi_reset_control_assert(rstcs[i].rstc);
 	return (0);
 }
 

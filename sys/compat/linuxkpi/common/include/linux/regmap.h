@@ -89,4 +89,26 @@ regmap_register_patch(struct regmap *map, const struct reg_sequence *regs,
 	return (0);
 }
 
+static inline int
+regmap_assign_bits(struct regmap *map, unsigned int reg,
+    unsigned int bits, bool value)
+{
+	if (value)
+		return (lkpi_regmap_update_bits(map, reg, bits, bits));
+	else
+		return (lkpi_regmap_update_bits(map, reg, bits, 0));
+}
+
+static inline int
+regmap_set_bits(struct regmap *map, unsigned int reg, unsigned int bits)
+{
+	return (lkpi_regmap_update_bits(map, reg, bits, bits));
+}
+
+static inline int
+regmap_clear_bits(struct regmap *map, unsigned int reg, unsigned int bits)
+{
+	return (lkpi_regmap_update_bits(map, reg, bits, 0));
+}
+
 #endif /* _LINUXKPI_LINUX_REGMAP_H */

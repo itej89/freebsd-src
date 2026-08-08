@@ -117,4 +117,44 @@ clk_bulk_put(int num_clks, struct clk_bulk_data *clks)
 		lkpi_clk_put(clks[i].clk);
 }
 
+static inline long
+clk_round_rate(struct clk *clk, unsigned long rate)
+{
+	return (lkpi_clk_get_rate(clk));
+}
+
+static inline struct clk *
+devm_clk_get_enabled(struct device *dev, const char *id)
+{
+	struct clk *clk;
+	int ret;
+
+	clk = lkpi_devm_clk_get(dev, id);
+	if (IS_ERR(clk))
+		return clk;
+	ret = lkpi_clk_prepare_enable(clk);
+	if (ret) {
+		lkpi_clk_put(clk);
+		return ERR_PTR(ret);
+	}
+	return clk;
+}
+
+static inline struct clk *
+devm_clk_get_optional_enabled(struct device *dev, const char *id)
+{
+	struct clk *clk;
+	int ret;
+
+	clk = lkpi_devm_clk_get_optional(dev, id);
+	if (IS_ERR_OR_NULL(clk))
+		return clk;
+	ret = lkpi_clk_prepare_enable(clk);
+	if (ret) {
+		lkpi_clk_put(clk);
+		return ERR_PTR(ret);
+	}
+	return clk;
+}
+
 #endif /* _LINUXKPI_LINUX_CLK_H */
