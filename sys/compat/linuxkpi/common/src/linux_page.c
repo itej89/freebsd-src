@@ -561,8 +561,27 @@ retry:
 	page = vm_page_grab_iter(vm_obj, pindex, VM_ALLOC_NOCREAT, &pages);
 	if (page == NULL) {
 		page = PHYS_TO_VM_PAGE(IDX_TO_OFF(pfn));
-		if (page == NULL)
-			return (VM_FAULT_SIGBUS);
+		if (page == NULL) {
+			/*
+			 * No vm_page at this PA — likely an uncached
+			 * alias (e.g., SiFive L2 bypass at PA+offset).
+			 * Create a fictitious page so the pmap maps
+			 * the userspace PTE at the uncached address.
+			 */
+			page = vm_page_alloc_noobj(VM_ALLOC_WIRED);
+			if (page == NULL)
+				return (VM_FAULT_OOM);
+			page->phys_addr = IDX_TO_OFF(pfn);
+			vm_page_valid(page);
+			if (vm_page_insert(page, vm_obj, pindex) != 0) {
+				vm_page_unwire_noq(page);
+				vm_page_free(page);
+				return (VM_FAULT_OOM);
+			}
+			pmap_page_set_memattr(page, pgprot2cachemode(prot));
+			vma->vm_pfn_count++;
+			return (VM_FAULT_NOPAGE);
+		}
 		if (!vm_page_busy_acquire(page, VM_ALLOC_WAITFAIL)) {
 			pctrie_iter_reset(&pages);
 			goto retry;

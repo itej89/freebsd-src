@@ -97,13 +97,6 @@ sifive_ccache_flush_all(void)
 	if (ccache_va == NULL)
 		return;
 
-	/*
-	 * First flush L1 dcache on this CPU using T-HEAD
-	 * DCACHE.CIALL (clean+invalidate all dcache lines).
-	 */
-	__asm __volatile(".long 0x0030000b" ::: "memory"); /* th.dcache.ciall */
-	__asm __volatile(".long 0x0190000b" ::: "memory"); /* th.sync.s */
-
 	sifive_ccache_flush_range(0x40000000, 128 * 1024);
 }
 
