@@ -17,7 +17,8 @@ dev/eqos/if_eqos.c			optional	eqos
 dev/eqos/if_eqos_if.m			optional	eqos
 dev/eqos/if_eqos_starfive.c		optional	eqos
 
-riscv/starfive/jh7110_display.c		optional	vt
+# Disabled: using verisilicon DRM/KMS driver instead
+#riscv/starfive/jh7110_display.c		optional	vt
 riscv/starfive/jh7110_pwmdac.c		optional	sound
 riscv/starfive/jh7110_gpio.c		standard
 riscv/starfive/jh7110_pmu.c		standard
