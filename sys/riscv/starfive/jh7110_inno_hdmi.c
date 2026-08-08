@@ -45,8 +45,12 @@ jh7110_hdmi_enable(void)
 	int timeout;
 	uint32_t val;
 
-	if (!hdmi_probed)
+	if (!hdmi_probed) {
+		printf("jh7110_hdmi_enable: not probed, skip\n");
 		return;
+	}
+
+	printf("jh7110_hdmi_enable: start\n");
 
 	/* Bandgap + PHY config */
 	HDMI_WR(0x1b0, HDMI_RD(0x1b0) | 0x04);
@@ -54,41 +58,48 @@ jh7110_hdmi_enable(void)
 
 	/* PHY power down */
 	HDMI_WR(0x00, 0x63);
+	printf("jh7110_hdmi_enable: bandgap+phy_down done\n");
 
 	/* Pre-PLL config for 74.25 MHz (720p@60Hz) */
 	HDMI_WR(0x1a0, 0x01);
 	HDMI_WR(0x1aa, 0x0f);
-	HDMI_WR(0x1a1, 1);			/* prediv */
-	HDMI_WR(0x1a2, 0xf0);			/* frac_en=1, fbdiv hi */
-	HDMI_WR(0x1a3, 99);			/* fbdiv lo */
-	HDMI_WR(0x1a4, (1 << 4) | (2 << 2) | 2);	/* tmds div a/b/c */
-	HDMI_WR(0x1a5, (2 << 5) | 1);		/* pclk div b/a */
-	HDMI_WR(0x1a6, (3 << 5) | 4);		/* pclk div c/d */
+	HDMI_WR(0x1a1, 1);
+	HDMI_WR(0x1a2, 0xf0);
+	HDMI_WR(0x1a3, 99);
+	HDMI_WR(0x1a4, (1 << 4) | (2 << 2) | 2);
+	HDMI_WR(0x1a5, (2 << 5) | 1);
+	HDMI_WR(0x1a6, (3 << 5) | 4);
 
 	/* Post-PLL */
-	HDMI_WR(0x1ab, 1);			/* prediv */
-	HDMI_WR(0x1ac, 20);			/* fbdiv */
-	HDMI_WR(0x1ad, 1);			/* postdiv */
-	HDMI_WR(0x1aa, 0x0e);			/* post-PLL on */
+	HDMI_WR(0x1ab, 1);
+	HDMI_WR(0x1ac, 20);
+	HDMI_WR(0x1ad, 1);
+	HDMI_WR(0x1aa, 0x0e);
 
 	/* Enable pre-PLL */
 	HDMI_WR(0x1a0, 0x00);
+	printf("jh7110_hdmi_enable: PLLs configured, waiting lock\n");
 
 	/* Wait for pre-PLL lock */
 	timeout = 500000;
 	while (!(HDMI_RD(0x1a9) & 0x1) && --timeout > 0)
 		DELAY(1);
+	printf("jh7110_hdmi_enable: pre-PLL lock %s (timeout=%d, reg=0x%x)\n",
+	    timeout > 0 ? "OK" : "TIMEOUT", timeout, HDMI_RD(0x1a9));
 
 	/* Wait for post-PLL lock */
 	timeout = 500000;
 	while (!(HDMI_RD(0x1af) & 0x1) && --timeout > 0)
 		DELAY(1);
+	printf("jh7110_hdmi_enable: post-PLL lock %s (timeout=%d, reg=0x%x)\n",
+	    timeout > 0 ? "OK" : "TIMEOUT", timeout, HDMI_RD(0x1af));
 
 	/* LDO + serializer */
 	HDMI_WR(0x1b4, 0x07);
 	HDMI_WR(0x1be, 0x71);
 	HDMI_WR(0x1bf, 0x00);
 	HDMI_WR(0x1c0, 0x00);
+	printf("jh7110_hdmi_enable: LDO+serializer done\n");
 
 	/* PHY power down before timing config */
 	HDMI_WR(0x00, 0x63);
@@ -107,19 +118,17 @@ jh7110_hdmi_enable(void)
 	HDMI_WR(0x13, 750 - 720);
 	HDMI_WR(0x14, 750 - 725);
 	HDMI_WR(0x15, 730 - 725);
-
-	/* External timing, hsync+vsync positive */
 	HDMI_WR(0x08, (1 << 0) | (1 << 2) | (1 << 3));
+	printf("jh7110_hdmi_enable: timing done\n");
 
 	/* PHY power on */
 	HDMI_WR(0x00, 0x61);
-
 	/* TMDS driver on */
 	HDMI_WR(0x1b2, 0x8f);
-
 	/* Toggle output */
 	HDMI_WR(0xce, 0x00);
 	HDMI_WR(0xce, 0x01);
+	printf("jh7110_hdmi_enable: PHY on, TMDS on, output toggled\n");
 
 	/* dssctrl mux: route DC8200 pipe 0 to HDMI */
 	if (dss_res != NULL) {
@@ -130,7 +139,11 @@ jh7110_hdmi_enable(void)
 		val = bus_read_4(dss_res, 0x08);
 		val |= (1 << 3);
 		bus_write_4(dss_res, 0x08, val);
+		printf("jh7110_hdmi_enable: dssctrl mux done\n");
+	} else {
+		printf("jh7110_hdmi_enable: WARNING dss_res is NULL\n");
 	}
+	printf("jh7110_hdmi_enable: complete\n");
 }
 
 void
