@@ -1271,7 +1271,7 @@
 			clock-names = "sysclk", "mclk", "bclk", "pclk";
 			resets = <&voutcrg JH7110_VOUTRST_HDMI_TX_HDMI>;
 			reset-names = "hdmi_tx";
-			status = "disabled";
+			status = "okay";
 		};
 
 		dssctrl: dssctrl@295b0000 {
