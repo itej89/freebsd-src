@@ -578,7 +578,6 @@ retry:
 				vm_page_free(page);
 				return (VM_FAULT_OOM);
 			}
-			pmap_page_set_memattr(page, pgprot2cachemode(prot));
 			vma->vm_pfn_count++;
 			return (VM_FAULT_NOPAGE);
 		}
