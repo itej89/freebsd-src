@@ -45,12 +45,14 @@ jh7110_hdmi_enable(void)
 	int timeout;
 	uint32_t val;
 
-	if (!hdmi_probed) {
-		printf("jh7110_hdmi_enable: not probed, skip\n");
+	if (!hdmi_probed || hdmi_res == NULL) {
+		printf("jh7110_hdmi_enable: not ready (probed=%d res=%p), skip\n",
+		    hdmi_probed, hdmi_res);
 		return;
 	}
 
-	printf("jh7110_hdmi_enable: start\n");
+	printf("jh7110_hdmi_enable: start (res=%p dss=%p)\n",
+	    hdmi_res, dss_res);
 
 	/* Bandgap + PHY config */
 	HDMI_WR(0x1b0, HDMI_RD(0x1b0) | 0x04);
