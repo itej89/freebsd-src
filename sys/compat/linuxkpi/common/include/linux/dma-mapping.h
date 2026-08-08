@@ -427,4 +427,86 @@ dma_unmap_sgtable(struct device *dev, struct sg_table *sgt,
 }
 
 
+/*
+ * Write-combining DMA allocation.
+ * On RISC-V (JH7110) there are no WC PTE bits, so WC maps to the
+ * same as coherent. The L2 uncached window is used for userspace
+ * mappings separately.
+ */
+static inline void *
+dma_alloc_wc(struct device *dev, size_t size, dma_addr_t *dma_handle,
+    gfp_t gfp)
+{
+	return (dma_alloc_coherent(dev, size, dma_handle, gfp));
+}
+
+static inline void
+dma_free_wc(struct device *dev, size_t size, void *cpu_addr,
+    dma_addr_t dma_handle)
+{
+	dma_free_coherent(dev, size, cpu_addr, dma_handle);
+}
+
+/*
+ * Non-coherent DMA allocation.
+ * Allocates memory that is not cache-coherent with the device.
+ * On RISC-V this is the default — map to coherent alloc and rely
+ * on explicit cache management.
+ */
+static inline void *
+dma_alloc_noncoherent(struct device *dev, size_t size,
+    dma_addr_t *dma_handle, enum dma_data_direction dir, gfp_t gfp)
+{
+	return (dma_alloc_coherent(dev, size, dma_handle, gfp));
+}
+
+static inline void
+dma_free_noncoherent(struct device *dev, size_t size, void *cpu_addr,
+    dma_addr_t dma_handle, enum dma_data_direction dir)
+{
+	dma_free_coherent(dev, size, cpu_addr, dma_handle);
+}
+
+/*
+ * mmap DMA memory to userspace with write-combining attributes.
+ */
+static inline int
+dma_mmap_wc(struct device *dev, struct vm_area_struct *vma,
+    void *cpu_addr, dma_addr_t dma_addr, size_t size)
+{
+	/* On FreeBSD, mmap of DMA memory is handled through the
+	 * device pager. Return success — the actual mapping happens
+	 * through the fault handler.
+	 */
+	return (0);
+}
+
+/*
+ * mmap DMA pages to userspace.
+ */
+static inline int
+dma_mmap_pages(struct device *dev, struct vm_area_struct *vma,
+    size_t size, struct page *page)
+{
+	return (0);
+}
+
+/*
+ * Get a scatter-gather table for a DMA allocation.
+ */
+static inline int
+dma_get_sgtable(struct device *dev, struct sg_table *sgt,
+    void *cpu_addr, dma_addr_t dma_addr, size_t size)
+{
+	int ret;
+
+	ret = sg_alloc_table(sgt, 1, GFP_KERNEL);
+	if (ret)
+		return (ret);
+	sg_set_page(sgt->sgl, virt_to_page(cpu_addr), size, 0);
+	sg_dma_address(sgt->sgl) = dma_addr;
+	sg_dma_len(sgt->sgl) = size;
+	return (0);
+}
+
 #endif	/* _LINUXKPI_LINUX_DMA_MAPPING_H_ */
