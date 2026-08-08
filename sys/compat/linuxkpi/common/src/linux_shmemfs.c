@@ -38,6 +38,7 @@
 #include <vm/vm_pager.h>
 
 #include <linux/fs.h>
+#include <linux/gfp.h>
 #include <linux/mm.h>
 #include <linux/shmem_fs.h>
 
@@ -56,6 +57,27 @@ linux_shmem_read_mapping_page_gfp(vm_object_t obj, int pindex, gfp_t gfp)
 	VM_OBJECT_WUNLOCK(obj);
 	if (rv != VM_PAGER_OK)
 		return (ERR_PTR(-EINVAL));
+
+	if ((gfp & __GFP_DMA32) && VM_PAGE_TO_PHYS(page) >= 0x100000000ULL) {
+		vm_page_t newpage;
+
+		newpage = vm_page_alloc_noobj_contig(VM_ALLOC_WIRED | VM_ALLOC_NORMAL,
+		    1, 0, 0xFFFFFFFFUL, PAGE_SIZE, 0, VM_MEMATTR_DEFAULT);
+		if (newpage == NULL) {
+			vm_page_unwire(page, PQ_ACTIVE);
+			return (ERR_PTR(-ENOMEM));
+		}
+		pmap_copy_page(page, newpage);
+		VM_OBJECT_WLOCK(obj);
+		vm_page_replace(newpage, obj, pindex, page);
+		VM_OBJECT_WUNLOCK(obj);
+		vm_page_unwire_noq(page);
+		vm_page_free(page);
+		page = newpage;
+		vm_page_valid(page);
+		vm_page_xunbusy(page);
+	}
+
 	return (page);
 }
 
