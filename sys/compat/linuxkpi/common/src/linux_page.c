@@ -458,8 +458,6 @@ vmap(struct page **pages, unsigned int count, unsigned long flags, int prot)
 					va += PAGE_SIZE;
 				}
 				sfence_vma();
-				printf("vmap: uncached mapping %u pages at VA=%p (uc_off=0x%lx)\n",
-				    count, (void *)off, (unsigned long)uc_off);
 				return ((void *)off);
 			}
 		}
