@@ -232,25 +232,56 @@ jh7110_inno_hdmi_attach(device_t dev)
 
 	hdmi_dev = dev;
 
-	/* Enable all clocks from DTS and store for later re-enable */
+	/*
+	 * Enable ALL VOUT clocks from both the HDMI and DC8200 DTS nodes.
+	 * The JH7110 clock gate writes glitch the VOUT domain, so we must
+	 * enable everything here at boot before any other driver touches
+	 * the clock framework. Later clk_enable calls will just bump the
+	 * refcount without hardware writes.
+	 */
+
+	/* Enable HDMI clocks from our own DTS node */
 	for (i = 0; i < 8 && clk_get_by_ofw_index(dev, 0, i, &clk) == 0; i++) {
 		hdmi_clks[i] = clk;
-		int err = clk_enable(clk);
-		uint64_t freq = 0;
-		clk_get_freq(clk, &freq);
-		device_printf(dev, "clock %d: enable=%d freq=%lu\n",
-		    i, err, (unsigned long)freq);
+		clk_enable(clk);
 	}
 	hdmi_nclks = i;
-	device_printf(dev, "enabled %d clocks\n", i);
+	device_printf(dev, "enabled %d HDMI clocks\n", i);
 
-	/* Deassert reset */
+	/* Enable DC8200 clocks from the DC8200 DTS node */
+	{
+		phandle_t dc_node;
+		clk_t dc_clk;
+		int j;
+
+		dc_node = OF_finddevice("/soc/dc8200@29400000");
+		if (dc_node > 0) {
+			for (j = 0; clk_get_by_ofw_index(dev, dc_node, j,
+			    &dc_clk) == 0; j++)
+				clk_enable(dc_clk);
+			device_printf(dev, "enabled %d DC8200 clocks\n", j);
+		}
+	}
+
+	/* Deassert HDMI reset */
 	if (hwreset_get_by_ofw_idx(dev, 0, 0, &rst) == 0) {
 		hdmi_rst = rst;
-		int err = hwreset_deassert(rst);
-		device_printf(dev, "reset deassert=%d\n", err);
-	} else {
-		device_printf(dev, "warning: could not get reset\n");
+		hwreset_deassert(rst);
+	}
+
+	/* Deassert DC8200 resets */
+	{
+		phandle_t dc_node;
+		hwreset_t dc_rst;
+		int j;
+
+		dc_node = OF_finddevice("/soc/dc8200@29400000");
+		if (dc_node > 0) {
+			for (j = 0; hwreset_get_by_ofw_idx(dev, dc_node, j,
+			    &dc_rst) == 0; j++)
+				hwreset_deassert(dc_rst);
+			device_printf(dev, "deasserted %d DC8200 resets\n", j);
+		}
 	}
 
 	DELAY(50000);
