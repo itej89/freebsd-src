@@ -34,6 +34,7 @@ static struct resource *dss_res;
 static device_t hdmi_dev;
 static clk_t hdmi_clks[8];
 static int hdmi_nclks;
+static clk_t dc_pix_clk;
 static hwreset_t hdmi_rst;
 static bool hdmi_probed = false;
 
@@ -66,6 +67,12 @@ jh7110_hdmi_enable(void)
 		printf("jh7110_hdmi_enable: clk[%d] enable=%d freq=%lu\n",
 		    ci, err, (unsigned long)freq);
 	}
+	/* Enable DC8200 pixel clock */
+	if (dc_pix_clk != NULL) {
+		clk_enable(dc_pix_clk);
+		printf("jh7110_hdmi_enable: pix0 clock enabled\n");
+	}
+
 	if (hdmi_rst != NULL) {
 		printf("jh7110_hdmi_enable: deassert reset\n");
 		hwreset_deassert(hdmi_rst);
@@ -243,6 +250,18 @@ jh7110_inno_hdmi_attach(device_t dev)
 
 	if (hwreset_get_by_ofw_idx(dev, 0, 0, &rst) == 0)
 		hdmi_rst = rst;
+
+	/* Get DC8200 pixel clock reference for later enable */
+	{
+		phandle_t dc_node;
+
+		dc_node = OF_finddevice("/soc/dc8200@29400000");
+		if (dc_node > 0) {
+			if (clk_get_by_ofw_name(dev, dc_node, "pix0",
+			    &dc_pix_clk) != 0)
+				dc_pix_clk = NULL;
+		}
+	}
 
 	DELAY(50000);
 
