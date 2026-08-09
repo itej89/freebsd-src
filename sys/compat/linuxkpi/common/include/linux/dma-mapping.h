@@ -474,11 +474,18 @@ static inline int
 dma_mmap_wc(struct device *dev, struct vm_area_struct *vma,
     void *cpu_addr, dma_addr_t dma_addr, size_t size)
 {
-	/* On FreeBSD, mmap of DMA memory is handled through the
-	 * device pager. Return success — the actual mapping happens
-	 * through the fault handler.
-	 */
+#ifdef __riscv
+	extern uint64_t sifive_ccache_uncached_offset(void);
+	unsigned long pfn;
+	uint64_t uc_off;
+
+	uc_off = sifive_ccache_uncached_offset();
+	pfn = (dma_addr + uc_off) >> PAGE_SHIFT;
+	return (remap_pfn_range(vma, vma->vm_start, pfn,
+	    size, pgprot_noncached(vma->vm_page_prot)));
+#else
 	return (0);
+#endif
 }
 
 /*
