@@ -200,18 +200,33 @@ jh7110_inno_hdmi_attach(device_t dev)
 
 	/* Enable all clocks from DTS */
 	for (i = 0; clk_get_by_ofw_index(dev, 0, i, &clk) == 0; i++) {
-		if (clk_enable(clk) != 0)
-			device_printf(dev, "failed to enable clock %d\n", i);
+		int err = clk_enable(clk);
+		uint64_t freq = 0;
+		clk_get_freq(clk, &freq);
+		device_printf(dev, "clock %d: enable=%d freq=%lu\n",
+		    i, err, (unsigned long)freq);
 	}
+	device_printf(dev, "enabled %d clocks\n", i);
 
 	/* Deassert reset */
-	if (hwreset_get_by_ofw_idx(dev, 0, 0, &rst) == 0)
-		hwreset_deassert(rst);
+	if (hwreset_get_by_ofw_idx(dev, 0, 0, &rst) == 0) {
+		int err = hwreset_deassert(rst);
+		device_printf(dev, "reset deassert=%d\n", err);
+	} else {
+		device_printf(dev, "warning: could not get reset\n");
+	}
 
 	DELAY(50000);
 
+	/* Verify register access */
+	{
+		uint32_t test = bus_read_4(hdmi_res, 0);
+		device_printf(dev, "reg[0x00]=0x%x (read test)\n", test);
+	}
+
 	hdmi_probed = true;
-	device_printf(dev, "HDMI TX ready\n");
+	device_printf(dev, "HDMI TX ready (res=%p dss=%p)\n",
+	    hdmi_res, dss_res);
 
 	return (0);
 }
