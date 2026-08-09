@@ -233,26 +233,16 @@ jh7110_inno_hdmi_attach(device_t dev)
 	hdmi_dev = dev;
 
 	/*
-	 * Enable ALL VOUT clocks from both the HDMI and DC8200 DTS nodes.
-	 * The JH7110 clock gate writes glitch the VOUT domain, so we must
-	 * enable everything here at boot before any other driver touches
-	 * the clock framework. Later clk_enable calls will just bump the
-	 * refcount without hardware writes.
+	 * Get clock and reset references but DON'T enable them yet.
+	 * DC8200 kmod will enable system clocks first, then
+	 * jh7110_hdmi_enable() enables HDMI clocks on demand.
 	 */
-
-	/* Enable HDMI clocks from our own DTS node */
-	for (i = 0; i < 8 && clk_get_by_ofw_index(dev, 0, i, &clk) == 0; i++) {
+	for (i = 0; i < 8 && clk_get_by_ofw_index(dev, 0, i, &clk) == 0; i++)
 		hdmi_clks[i] = clk;
-		clk_enable(clk);
-	}
 	hdmi_nclks = i;
-	device_printf(dev, "enabled %d HDMI clocks\n", i);
 
-	/* Deassert HDMI reset */
-	if (hwreset_get_by_ofw_idx(dev, 0, 0, &rst) == 0) {
+	if (hwreset_get_by_ofw_idx(dev, 0, 0, &rst) == 0)
 		hdmi_rst = rst;
-		hwreset_deassert(rst);
-	}
 
 	DELAY(50000);
 
