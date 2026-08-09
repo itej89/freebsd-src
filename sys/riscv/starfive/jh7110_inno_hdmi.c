@@ -67,6 +67,12 @@ jh7110_hdmi_enable(void)
 	printf("jh7110_hdmi_enable: start (res=%p dss=%p clks re-enabled)\n",
 	    hdmi_res, dss_res);
 
+	/* Test register access before doing anything */
+	{
+		uint32_t test = bus_read_4(hdmi_res, 0);
+		printf("jh7110_hdmi_enable: reg read test reg[0x00]=0x%x\n", test);
+	}
+
 	/* Bandgap + PHY config */
 	HDMI_WR(0x1b0, HDMI_RD(0x1b0) | 0x04);
 	HDMI_WR(0x1cc, 0x0f);
