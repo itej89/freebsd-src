@@ -474,13 +474,10 @@ static inline int
 dma_mmap_wc(struct device *dev, struct vm_area_struct *vma,
     void *cpu_addr, dma_addr_t dma_addr, size_t size)
 {
-#ifdef __riscv
 	vma->vm_page_prot = pgprot_writecombine(vma->vm_page_prot);
-	if (vma->vm_obj != NULL) {
-		vm_memattr_t attr = pgprot2cachemode(vma->vm_page_prot);
-		vm_object_set_memattr(vma->vm_obj, attr);
-	}
-#endif
+	vma->vm_pfn = dma_addr >> PAGE_SHIFT;
+	vma->vm_len = size;
+	vma->vm_ops = NULL;
 	return (0);
 }
 
