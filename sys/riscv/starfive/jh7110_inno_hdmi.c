@@ -35,6 +35,7 @@ static device_t hdmi_dev;
 static clk_t hdmi_clks[8];
 static int hdmi_nclks;
 static clk_t dc_pix_clk;
+static clk_t dc_hdmitx_pixclk;
 static hwreset_t hdmi_rst;
 static bool hdmi_probed = false;
 
@@ -67,8 +68,13 @@ jh7110_hdmi_enable(void)
 		printf("jh7110_hdmi_enable: clk[%d] enable=%d freq=%lu\n",
 		    ci, err, (unsigned long)freq);
 	}
-	/* Enable DC8200 pixel clock */
+	/* Enable DC8200 pixel clock and set mux to HDMI TX pixel clock */
 	if (dc_pix_clk != NULL) {
+		if (dc_hdmitx_pixclk != NULL) {
+			int err = clk_set_parent_by_clk(dc_pix_clk,
+			    dc_hdmitx_pixclk);
+			printf("jh7110_hdmi_enable: pix0 mux -> hdmitx0_pixelclk ret=%d\n", err);
+		}
 		clk_enable(dc_pix_clk);
 		printf("jh7110_hdmi_enable: pix0 clock enabled\n");
 	}
@@ -251,7 +257,7 @@ jh7110_inno_hdmi_attach(device_t dev)
 	if (hwreset_get_by_ofw_idx(dev, 0, 0, &rst) == 0)
 		hdmi_rst = rst;
 
-	/* Get DC8200 pixel clock reference for later enable */
+	/* Get DC8200 pixel clock and HDMI TX pixel clock for mux setup */
 	{
 		phandle_t dc_node;
 
@@ -261,6 +267,14 @@ jh7110_inno_hdmi_attach(device_t dev)
 			    &dc_pix_clk) != 0)
 				dc_pix_clk = NULL;
 		}
+
+		/* Get hdmitx0_pixelclk from HDMI node (clock-names "pclk") */
+		if (clk_get_by_ofw_name(dev, 0, "pclk",
+		    &dc_hdmitx_pixclk) != 0)
+			dc_hdmitx_pixclk = NULL;
+
+		device_printf(dev, "pix0=%p hdmitx_pix=%p\n",
+		    dc_pix_clk, dc_hdmitx_pixclk);
 	}
 
 	DELAY(50000);
