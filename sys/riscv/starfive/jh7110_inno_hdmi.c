@@ -58,26 +58,39 @@ jh7110_hdmi_enable(void)
 	}
 
 	/* Re-enable clocks and deassert reset before register access */
-	for (ci = 0; ci < hdmi_nclks; ci++)
-		clk_enable(hdmi_clks[ci]);
-	if (hdmi_rst != NULL)
+	printf("jh7110_hdmi_enable: re-enabling %d clocks\n", hdmi_nclks);
+	for (ci = 0; ci < hdmi_nclks; ci++) {
+		int err = clk_enable(hdmi_clks[ci]);
+		uint64_t freq = 0;
+		clk_get_freq(hdmi_clks[ci], &freq);
+		printf("jh7110_hdmi_enable: clk[%d] enable=%d freq=%lu\n",
+		    ci, err, (unsigned long)freq);
+	}
+	if (hdmi_rst != NULL) {
+		printf("jh7110_hdmi_enable: deassert reset\n");
 		hwreset_deassert(hdmi_rst);
+		printf("jh7110_hdmi_enable: reset deasserted\n");
+	}
+	printf("jh7110_hdmi_enable: delay 10ms\n");
 	DELAY(10000);
 
-	printf("jh7110_hdmi_enable: start (res=%p dss=%p clks re-enabled)\n",
-	    hdmi_res, dss_res);
-
-	/* Test register access before doing anything */
+	printf("jh7110_hdmi_enable: about to read reg[0x00]\n");
 	{
 		uint32_t test = bus_read_4(hdmi_res, 0);
-		printf("jh7110_hdmi_enable: reg read test reg[0x00]=0x%x\n", test);
+		printf("jh7110_hdmi_enable: reg[0x00]=0x%x OK\n", test);
 	}
 
-	/* Bandgap + PHY config */
-	HDMI_WR(0x1b0, HDMI_RD(0x1b0) | 0x04);
+	printf("jh7110_hdmi_enable: about to read reg[0x1b0]\n");
+	{
+		uint32_t v = HDMI_RD(0x1b0);
+		printf("jh7110_hdmi_enable: reg[0x1b0]=0x%x, writing 0x%x\n",
+		    v, v | 0x04);
+		HDMI_WR(0x1b0, v | 0x04);
+		printf("jh7110_hdmi_enable: reg[0x1b0] write done\n");
+	}
 	HDMI_WR(0x1cc, 0x0f);
+	printf("jh7110_hdmi_enable: reg[0x1cc] write done\n");
 
-	/* PHY power down */
 	HDMI_WR(0x00, 0x63);
 	printf("jh7110_hdmi_enable: bandgap+phy_down done\n");
 
