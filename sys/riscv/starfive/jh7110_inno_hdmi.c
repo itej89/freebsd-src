@@ -31,6 +31,10 @@
 
 static struct resource *hdmi_res;
 static struct resource *dss_res;
+static device_t hdmi_dev;
+static clk_t hdmi_clks[8];
+static int hdmi_nclks;
+static hwreset_t hdmi_rst;
 static bool hdmi_probed = false;
 
 bool
@@ -45,13 +49,22 @@ jh7110_hdmi_enable(void)
 	int timeout;
 	uint32_t val;
 
+	int ci;
+
 	if (!hdmi_probed || hdmi_res == NULL) {
 		printf("jh7110_hdmi_enable: not ready (probed=%d res=%p), skip\n",
 		    hdmi_probed, hdmi_res);
 		return;
 	}
 
-	printf("jh7110_hdmi_enable: start (res=%p dss=%p)\n",
+	/* Re-enable clocks and deassert reset before register access */
+	for (ci = 0; ci < hdmi_nclks; ci++)
+		clk_enable(hdmi_clks[ci]);
+	if (hdmi_rst != NULL)
+		hwreset_deassert(hdmi_rst);
+	DELAY(10000);
+
+	printf("jh7110_hdmi_enable: start (res=%p dss=%p clks re-enabled)\n",
 	    hdmi_res, dss_res);
 
 	/* Bandgap + PHY config */
@@ -198,18 +211,23 @@ jh7110_inno_hdmi_attach(device_t dev)
 	if (dss_res == NULL)
 		device_printf(dev, "warning: could not map dssctrl\n");
 
-	/* Enable all clocks from DTS */
-	for (i = 0; clk_get_by_ofw_index(dev, 0, i, &clk) == 0; i++) {
+	hdmi_dev = dev;
+
+	/* Enable all clocks from DTS and store for later re-enable */
+	for (i = 0; i < 8 && clk_get_by_ofw_index(dev, 0, i, &clk) == 0; i++) {
+		hdmi_clks[i] = clk;
 		int err = clk_enable(clk);
 		uint64_t freq = 0;
 		clk_get_freq(clk, &freq);
 		device_printf(dev, "clock %d: enable=%d freq=%lu\n",
 		    i, err, (unsigned long)freq);
 	}
+	hdmi_nclks = i;
 	device_printf(dev, "enabled %d clocks\n", i);
 
 	/* Deassert reset */
 	if (hwreset_get_by_ofw_idx(dev, 0, 0, &rst) == 0) {
+		hdmi_rst = rst;
 		int err = hwreset_deassert(rst);
 		device_printf(dev, "reset deassert=%d\n", err);
 	} else {
