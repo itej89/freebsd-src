@@ -248,34 +248,6 @@ jh7110_inno_hdmi_attach(device_t dev)
 	hdmi_nclks = i;
 	device_printf(dev, "enabled %d HDMI clocks\n", i);
 
-	/* Enable DC8200 clocks from the DC8200 DTS node */
-	{
-		phandle_t dc_node;
-		clk_t dc_clk;
-		hwreset_t dc_rst;
-		int j;
-
-		dc_node = OF_finddevice("/soc/dc8200@29400000");
-		device_printf(dev, "DC8200 node lookup: %d\n", (int)dc_node);
-		if (dc_node <= 0) {
-			phandle_t root = OF_finddevice("/");
-			phandle_t soc = OF_finddevice("/soc");
-			device_printf(dev, "root=%d soc=%d\n",
-			    (int)root, (int)soc);
-		}
-		if (dc_node > 0) {
-			for (j = 0; clk_get_by_ofw_index(dev, dc_node, j,
-			    &dc_clk) == 0; j++)
-				clk_enable(dc_clk);
-			device_printf(dev, "enabled %d DC8200 clocks\n", j);
-
-			for (j = 0; hwreset_get_by_ofw_idx(dev, dc_node, j,
-			    &dc_rst) == 0; j++)
-				hwreset_deassert(dc_rst);
-			device_printf(dev, "deasserted %d DC8200 resets\n", j);
-		}
-	}
-
 	/* Deassert HDMI reset */
 	if (hwreset_get_by_ofw_idx(dev, 0, 0, &rst) == 0) {
 		hdmi_rst = rst;
