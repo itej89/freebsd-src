@@ -53,59 +53,27 @@ jh7110_hdmi_enable(void)
 
 	int ci;
 
-	if (!hdmi_probed || hdmi_res == NULL) {
-		printf("jh7110_hdmi_enable: not ready (probed=%d res=%p), skip\n",
-		    hdmi_probed, hdmi_res);
+	if (!hdmi_probed || hdmi_res == NULL)
 		return;
-	}
 
 	/* Re-enable clocks and deassert reset before register access */
-	printf("jh7110_hdmi_enable: re-enabling %d clocks\n", hdmi_nclks);
-	for (ci = 0; ci < hdmi_nclks; ci++) {
-		int err = clk_enable(hdmi_clks[ci]);
-		uint64_t freq = 0;
-		clk_get_freq(hdmi_clks[ci], &freq);
-		printf("jh7110_hdmi_enable: clk[%d] enable=%d freq=%lu\n",
-		    ci, err, (unsigned long)freq);
-	}
-	/* Enable DC8200 pixel clock and set mux to HDMI TX pixel clock */
+	for (ci = 0; ci < hdmi_nclks; ci++)
+		clk_enable(hdmi_clks[ci]);
+
 	if (dc_pix_clk != NULL) {
-		if (dc_hdmitx_pixclk != NULL) {
-			int err = clk_set_parent_by_clk(dc_pix_clk,
-			    dc_hdmitx_pixclk);
-			printf("jh7110_hdmi_enable: pix0 mux -> hdmitx0_pixelclk ret=%d\n", err);
-		}
+		if (dc_hdmitx_pixclk != NULL)
+			clk_set_parent_by_clk(dc_pix_clk, dc_hdmitx_pixclk);
 		clk_enable(dc_pix_clk);
-		printf("jh7110_hdmi_enable: pix0 clock enabled\n");
 	}
 
-	if (hdmi_rst != NULL) {
-		printf("jh7110_hdmi_enable: deassert reset\n");
+	if (hdmi_rst != NULL)
 		hwreset_deassert(hdmi_rst);
-		printf("jh7110_hdmi_enable: reset deasserted\n");
-	}
-	printf("jh7110_hdmi_enable: delay 10ms\n");
 	DELAY(10000);
 
-	printf("jh7110_hdmi_enable: about to read reg[0x00]\n");
-	{
-		uint32_t test = bus_read_4(hdmi_res, 0);
-		printf("jh7110_hdmi_enable: reg[0x00]=0x%x OK\n", test);
-	}
-
-	printf("jh7110_hdmi_enable: about to read reg[0x1b0]\n");
-	{
-		uint32_t v = HDMI_RD(0x1b0);
-		printf("jh7110_hdmi_enable: reg[0x1b0]=0x%x, writing 0x%x\n",
-		    v, v | 0x04);
-		HDMI_WR(0x1b0, v | 0x04);
-		printf("jh7110_hdmi_enable: reg[0x1b0] write done\n");
-	}
+	/* Bandgap + PHY config */
+	HDMI_WR(0x1b0, HDMI_RD(0x1b0) | 0x04);
 	HDMI_WR(0x1cc, 0x0f);
-	printf("jh7110_hdmi_enable: reg[0x1cc] write done\n");
-
 	HDMI_WR(0x00, 0x63);
-	printf("jh7110_hdmi_enable: bandgap+phy_down done\n");
 
 	/* Pre-PLL config for 74.25 MHz (720p@60Hz) */
 	HDMI_WR(0x1a0, 0x01);
@@ -125,28 +93,20 @@ jh7110_hdmi_enable(void)
 
 	/* Enable pre-PLL */
 	HDMI_WR(0x1a0, 0x00);
-	printf("jh7110_hdmi_enable: PLLs configured, waiting lock\n");
 
-	/* Wait for pre-PLL lock */
+	/* Wait for PLL lock */
 	timeout = 500000;
 	while (!(HDMI_RD(0x1a9) & 0x1) && --timeout > 0)
 		DELAY(1);
-	printf("jh7110_hdmi_enable: pre-PLL lock %s (timeout=%d, reg=0x%x)\n",
-	    timeout > 0 ? "OK" : "TIMEOUT", timeout, HDMI_RD(0x1a9));
-
-	/* Wait for post-PLL lock */
 	timeout = 500000;
 	while (!(HDMI_RD(0x1af) & 0x1) && --timeout > 0)
 		DELAY(1);
-	printf("jh7110_hdmi_enable: post-PLL lock %s (timeout=%d, reg=0x%x)\n",
-	    timeout > 0 ? "OK" : "TIMEOUT", timeout, HDMI_RD(0x1af));
 
 	/* LDO + serializer */
 	HDMI_WR(0x1b4, 0x07);
 	HDMI_WR(0x1be, 0x71);
 	HDMI_WR(0x1bf, 0x00);
 	HDMI_WR(0x1c0, 0x00);
-	printf("jh7110_hdmi_enable: LDO+serializer done\n");
 
 	/* PHY power down before timing config */
 	HDMI_WR(0x00, 0x63);
@@ -166,13 +126,10 @@ jh7110_hdmi_enable(void)
 	HDMI_WR(0x14, 750 - 725);
 	HDMI_WR(0x15, 730 - 725);
 	HDMI_WR(0x08, (1 << 0) | (1 << 2) | (1 << 3));
-	printf("jh7110_hdmi_enable: timing done\n");
 
 	/* PHY power on */
 	HDMI_WR(0x00, 0x61);
-	/* TMDS driver on */
 	HDMI_WR(0x1b2, 0x8f);
-	/* Toggle output */
 	HDMI_WR(0xce, 0x00);
 	HDMI_WR(0xce, 0x01);
 	printf("jh7110_hdmi_enable: PHY on, TMDS on, output toggled\n");
@@ -273,21 +230,12 @@ jh7110_inno_hdmi_attach(device_t dev)
 		    &dc_hdmitx_pixclk) != 0)
 			dc_hdmitx_pixclk = NULL;
 
-		device_printf(dev, "pix0=%p hdmitx_pix=%p\n",
-		    dc_pix_clk, dc_hdmitx_pixclk);
 	}
 
 	DELAY(50000);
 
-	/* Verify register access */
-	{
-		uint32_t test = bus_read_4(hdmi_res, 0);
-		device_printf(dev, "reg[0x00]=0x%x (read test)\n", test);
-	}
-
 	hdmi_probed = true;
-	device_printf(dev, "HDMI TX ready (res=%p dss=%p)\n",
-	    hdmi_res, dss_res);
+	device_printf(dev, "HDMI TX ready\n");
 
 	return (0);
 }
