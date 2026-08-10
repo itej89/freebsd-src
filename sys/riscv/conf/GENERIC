@@ -134,6 +134,13 @@ device		umass			# Disks/Mass storage - Requires scbus and da
 options 	HID_DEBUG	# enable debug msgs
 device		hid		# Generic HID support
 device		hidbus		# Generic HID Bus
+device		hidmap		# HID to evdev mapping
+device		hkbd		# HID keyboard
+device		hms		# HID mouse
+
+# evdev input support (required for Wayland compositors)
+device		evdev
+options 	EVDEV_SUPPORT
 
 # Serial (COM) ports
 device		uart		# Generic UART driver
