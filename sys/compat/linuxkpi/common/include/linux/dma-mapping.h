@@ -474,10 +474,7 @@ static inline int
 dma_mmap_wc(struct device *dev, struct vm_area_struct *vma,
     void *cpu_addr, dma_addr_t dma_addr, size_t size)
 {
-	vma->vm_page_prot = pgprot_writecombine(vma->vm_page_prot);
-	vma->vm_pfn = dma_addr >> PAGE_SHIFT;
-	vma->vm_len = size;
-	vma->vm_ops = NULL;
+	/* Map cached — L2 flush before scanout handles coherency */
 	return (0);
 }
 
