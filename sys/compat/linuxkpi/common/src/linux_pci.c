@@ -1987,11 +1987,14 @@ linux_dma_map_sg_attrs(struct device *dev, struct scatterlist *sgl, int nents,
 		sg_dma_address(sg) = seg.ds_addr;
 	}
 
+	printf("linux_dma_map_sg: loop done, attrs=0x%lx\n", attrs);
 	if ((attrs & DMA_ATTR_SKIP_CPU_SYNC) != 0)
 		goto skip_sync;
 
+	printf("linux_dma_map_sg: about to sync dir=%d\n", direction);
 	switch (direction) {
 	case DMA_BIDIRECTIONAL:
+		printf("linux_dma_map_sg: sync PREWRITE\n");
 		bus_dmamap_sync(sg_tag, sgl->dma_map, BUS_DMASYNC_PREWRITE);
 		break;
 	case DMA_TO_DEVICE:
