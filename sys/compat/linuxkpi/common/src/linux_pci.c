@@ -1962,11 +1962,17 @@ linux_dma_map_sg_attrs(struct device *dev, struct scatterlist *sgl, int nents,
 	}
 	sgl->dma_sg_tag = sg_tag;
 
+	printf("linux_dma_map_sg: sg_tag=%p dma_map=%p nents=%d\n",
+	    sg_tag, sgl->dma_map, nents);
 	/* load all S/G list entries */
 	for_each_sg(sgl, sg, nents, i) {
 		nseg = -1;
+		vm_paddr_t pa = sg_phys(sg);
+		if (i < 3 || i == nents - 1)
+			printf("linux_dma_map_sg: [%d] pa=0x%lx len=%u\n",
+			    i, (unsigned long)pa, sg->length);
 		if (_bus_dmamap_load_phys(sg_tag, sgl->dma_map,
-		    sg_phys(sg), sg->length, BUS_DMA_NOWAIT,
+		    pa, sg->length, BUS_DMA_NOWAIT,
 		    &seg, &nseg) != 0) {
 			bus_dmamap_unload(sg_tag, sgl->dma_map);
 			bus_dmamap_destroy(sg_tag, sgl->dma_map);
