@@ -474,12 +474,10 @@ static inline int
 dma_mmap_wc(struct device *dev, struct vm_area_struct *vma,
     void *cpu_addr, dma_addr_t dma_addr, size_t size)
 {
-	/*
-	 * JH7110 DC8200 reads through the coherent CCache — no uncached
-	 * mapping or cache flushing needed. Plain cached mmap at full
-	 * CPU bandwidth. This matches Linux which treats all JH7110
-	 * devices as DMA-coherent (no dma-noncoherent in DTS).
-	 */
+	vma->vm_page_prot = pgprot_writecombine(vma->vm_page_prot);
+	vma->vm_pfn = dma_addr >> PAGE_SHIFT;
+	vma->vm_len = size;
+	vma->vm_ops = NULL;
 	return (0);
 }
 
