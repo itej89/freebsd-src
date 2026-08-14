@@ -291,10 +291,10 @@ dma_sync_single_for_device(struct device *dev, dma_addr_t dma,
 		op = BUS_DMASYNC_PREWRITE;
 		break;
 	case DMA_TO_DEVICE:
-		op = BUS_DMASYNC_PREREAD;
+		op = BUS_DMASYNC_PREWRITE;
 		break;
 	case DMA_FROM_DEVICE:
-		op = BUS_DMASYNC_PREWRITE;
+		op = BUS_DMASYNC_PREREAD;
 		break;
 	default:
 		return;
