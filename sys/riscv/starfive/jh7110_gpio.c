@@ -268,8 +268,27 @@ jh7110_gpio_pin_setflags(device_t dev, uint32_t pin, uint32_t flags)
 #define	PADCFG_IE		(1 << 0)
 #define	PADCFG_SMT		(1 << 6)
 
-/* Extract fields from GPIOMUX packed value */
-#define	PINMUX_IS_GPIO(v)	(((v) & (1 << 10)) == 0)
+/*
+ * Extract fields from GPIOMUX packed value.
+ *
+ * GPIOMUX(n, dout, doen, din) packs as
+ *     (din << 24) | (dout << 16) | (doen << 10) | n
+ * while a dedicated pin uses
+ *     PINMUX(n, func) = (1 << 10) | (func << 8) | n
+ *
+ * Bit 10 is therefore both the PINMUX marker AND the low bit of GPIOMUX's
+ * doen field, so testing bit 10 alone misclassifies every GPIOMUX entry
+ * whose doen is odd, and its mux is silently skipped. That went unnoticed
+ * because every pin group in the tree so far (uart, spi, mmc, i2c) happens
+ * to use even doen values; the HDMI group does not -- DDC SCL has doen 3
+ * and HPD has doen 1, so both were dropped while SDA (4) and CEC (2) were
+ * programmed, leaving EDID reads permanently timing out.
+ *
+ * A real PINMUX() value carries no din/dout, so its upper half is always
+ * zero. Treat a non-zero upper half as proof of GPIOMUX and only fall back
+ * to the bit-10 marker otherwise.
+ */
+#define	PINMUX_IS_GPIO(v)	(((v) >> 16) != 0 || (((v) & (1 << 10)) == 0))
 #define	PINMUX_GPIO(v)		((v) & 0x3f)
 #define	PINMUX_DOUT(v)		(((v) >> 16) & 0xff)
 #define	PINMUX_DOEN(v)		(((v) >> 10) & 0x3f)

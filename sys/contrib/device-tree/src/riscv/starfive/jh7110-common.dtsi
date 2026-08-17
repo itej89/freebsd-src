@@ -726,6 +726,47 @@
 		};
 	};
 
+	/*
+	 * HDMI DDC (SCL/SDA), CEC and hot-plug detect.
+	 *
+	 * Absent from the upstream 6.12 DTS that FreeBSD imports, but present in
+	 * StarFive's own DTB, which is why Debian can read EDID and we could not:
+	 * without this the pins are never muxed to the HDMI controller nor
+	 * input-enabled, so its DDC master drives nothing. The values are copied
+	 * verbatim from StarFive's jh7110-starfive-visionfive-2-v1.3b.dtb.
+	 *
+	 * GPIOMUX(n, dout, doen, din) packs as
+	 *   (din << 24) | (dout << 16) | (doen << 10) | n
+	 * so these decode to: SCL gpio0, SDA gpio1, CEC gpio14, HPD gpio15.
+	 * Raw values are used rather than the macro so the encoding matches
+	 * StarFive's blob exactly.
+	 */
+	hdmi_pins: hdmi-0 {
+		scl-pins {
+			pinmux = <0x060b0c00>;
+			bias-pull-up;
+			input-enable;
+		};
+
+		sda-pins {
+			pinmux = <0x070c1001>;
+			bias-pull-up;
+			input-enable;
+		};
+
+		cec-pins {
+			pinmux = <0x050a080e>;
+			bias-pull-up;
+			input-enable;
+		};
+
+		hpd-pins {
+			pinmux = <0x0800040f>;
+			bias-disable;
+			input-enable;
+		};
+	};
+
 	uart0_pins: uart0-0 {
 		tx-pins {
 			pinmux = <GPIOMUX(5, GPOUT_SYS_UART0_TX,
@@ -784,4 +825,9 @@
 
 &hdmi {
 	status = "okay";
+};
+
+&hdmi {
+	pinctrl-names = "default";
+	pinctrl-0 = <&hdmi_pins>;
 };
