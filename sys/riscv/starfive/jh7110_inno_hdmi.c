@@ -167,6 +167,7 @@ jh7110_hdmi_hpd_intr(void *arg)
 	taskqueue_enqueue(taskqueue_thread, &hdmi_hpd_task);
 }
 
+
 /*
  * Tri-state hot-plug read: 1 connected, 0 disconnected, -1 unknown.
  *

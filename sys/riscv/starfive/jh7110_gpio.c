@@ -81,25 +81,11 @@ struct jh7110_gpio_irqsrc {
 	struct intr_irqsrc	isrc;
 	uint32_t		pin;
 	uint32_t		mode;
-	uint32_t		count;	/* interrupts in the current window */
-	int			window;	/* tick the window opened */
-	int			muzzled_at;
-	bool			muzzled;
 };
 
-/*
- * A pin that re-asserts faster than it can be serviced will wedge the
- * machine with no panic and no console output. Cap it: report the state
- * that caused it, mask the pin for good, and let the system carry on.
- */
-/*
- * Storm threshold, per second. Set well above what real signalling produces
- * - a hot-plug line throws tens of edges as a connector seats and as the
- * transmitter powers up - but far below a stuck source, which re-asserts as
- * fast as it can be acknowledged and reaches this in milliseconds.
- */
+
+/* Full interrupt bring-up; see hw.jh7110_gpio.pic below. */
 #define	JH7110_GPIO_PIC_FULL	5
-#define	JH7110_GPIO_STORM_LIMIT	2000
 
 struct jh7110_gpio_softc {
 	device_t		dev;
@@ -114,7 +100,6 @@ struct jh7110_gpio_softc {
 	 * the sleepable mtx used by the pin and pinctrl paths cannot be taken.
 	 */
 	struct mtx		imtx;
-	struct callout		unmuzzle;
 	struct resource		*irq_res;
 	void			*irq_hdlr;
 	struct jh7110_gpio_irqsrc irqsrcs[GPIO_PINS];
@@ -522,39 +507,6 @@ jh7110_gpio_imodify(struct jh7110_gpio_softc *sc, bus_size_t base,
 	JH7110_GPIO_WRITE(sc, reg, val);
 }
 
-/*
- * Re-enable pins that were masked for interrupting too fast.
- *
- * Masking has to be temporary. A burst that trips the threshold is usually
- * transient - a connector seating, a transmitter powering up - and leaving
- * the pin masked for the rest of the boot turns a momentary problem into a
- * permanent loss of function, which is the outage the guard exists to
- * prevent. A source that is genuinely stuck simply trips again.
- */
-static void
-jh7110_gpio_unmuzzle(void *arg)
-{
-	struct jh7110_gpio_softc *sc = arg;
-	int i;
-
-	JH7110_GPIO_ILOCK(sc);
-	for (i = 0; i < GPIO_PINS; i++) {
-		if (!sc->irqsrcs[i].muzzled)
-			continue;
-		if ((ticks - sc->irqsrcs[i].muzzled_at) < hz)
-			continue;
-
-		sc->irqsrcs[i].muzzled = false;
-		sc->irqsrcs[i].count = 0;
-		jh7110_gpio_iclear(sc, i);
-		if (sc->irqsrcs[i].isrc.isrc_handlers != 0)
-			jh7110_gpio_imodify(sc, GPIOE_0, i, true);
-	}
-	JH7110_GPIO_IUNLOCK(sc);
-
-	callout_reset(&sc->unmuzzle, hz, jh7110_gpio_unmuzzle, sc);
-}
-
 static void
 jh7110_gpio_pic_enable_intr(device_t dev, struct intr_irqsrc *isrc)
 {
@@ -563,9 +515,6 @@ jh7110_gpio_pic_enable_intr(device_t dev, struct intr_irqsrc *isrc)
 
 	sc = device_get_softc(dev);
 	pin = ((struct jh7110_gpio_irqsrc *)isrc)->pin;
-
-	if (((struct jh7110_gpio_irqsrc *)isrc)->muzzled)
-		return;
 
 	JH7110_GPIO_ILOCK(sc);
 	jh7110_gpio_imodify(sc, GPIOE_0, pin, true);
@@ -637,7 +586,6 @@ jh7110_gpio_pic_setup_intr(device_t dev, struct intr_irqsrc *isrc,
 		return (girq->mode == mode ? 0 : EINVAL);
 
 	girq->mode = mode;
-
 
 	JH7110_GPIO_ILOCK(sc);
 
@@ -736,7 +684,6 @@ jh7110_gpio_intr(void *arg)
 	struct jh7110_gpio_softc *sc;
 	struct trapframe *tf;
 	uint32_t status;
-	struct jh7110_gpio_irqsrc *girq;
 	int bank, bit, pin, handled;
 
 	sc = (struct jh7110_gpio_softc *)arg;
@@ -752,42 +699,23 @@ jh7110_gpio_intr(void *arg)
 			bit = ffs(status) - 1;
 			status &= ~(1u << bit);
 			pin = bank * 32 + bit;
-			girq = &sc->irqsrcs[pin];
-
-			if (girq->muzzled) {
-				JH7110_GPIO_ILOCK(sc);
-				jh7110_gpio_imodify(sc, GPIOE_0, pin, false);
-				jh7110_gpio_iclear(sc, pin);
-				JH7110_GPIO_IUNLOCK(sc);
-				continue;
-			}
-
 			/*
-			 * Storm control is a rate, not a lifetime total: a
-			 * burst of contact bounce is normal and must not
-			 * permanently disable a pin. Only a source that
-			 * stays hot for a whole window is muzzled.
+			 * Ack before dispatching: an edge arriving while
+			 * the handler runs then latches again and is
+			 * serviced next time rather than being cleared
+			 * away afterwards and lost.
+			 *
+			 * No rate limiting here. The kernel already
+			 * throttles a storming source (hw.intr_storm_
+			 * threshold in kern_intr.c), and it throttles
+			 * rather than masks, so nothing is dropped. An
+			 * earlier version of this masked the pin itself
+			 * and swallowed the very cable change it was
+			 * meant to report.
 			 */
-			if (girq->count == 0 ||
-			    (ticks - girq->window) > hz) {
-				girq->window = ticks;
-				girq->count = 0;
-			}
-			girq->count++;
-
-
-			if (girq->count > JH7110_GPIO_STORM_LIMIT) {
-				girq->muzzled = true;
-				girq->muzzled_at = ticks;
-				JH7110_GPIO_ILOCK(sc);
-				jh7110_gpio_imodify(sc, GPIOE_0, pin, false);
-				jh7110_gpio_iclear(sc, pin);
-				JH7110_GPIO_IUNLOCK(sc);
-				device_printf(sc->dev,
-				    "pin %d storming (%u/sec); masked briefly\n",
-				    pin, girq->count);
-				continue;
-			}
+			JH7110_GPIO_ILOCK(sc);
+			jh7110_gpio_iclear(sc, pin);
+			JH7110_GPIO_IUNLOCK(sc);
 
 			if (intr_isrc_dispatch(PIC_INTR_ISRC(sc, pin), tf) != 0)
 				device_printf(sc->dev,
@@ -904,9 +832,6 @@ jh7110_gpio_pic_attach(struct jh7110_gpio_softc *sc)
 		device_printf(dev, "cannot register PIC\n");
 		goto fail;
 	}
-
-	callout_init_mtx(&sc->unmuzzle, &sc->mtx, 0);
-	callout_reset(&sc->unmuzzle, hz, jh7110_gpio_unmuzzle, sc);
 
 	return;
 
