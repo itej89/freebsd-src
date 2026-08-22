@@ -9,6 +9,12 @@
 
 int jh7110_hdmi_read_edid(uint8_t *buf, size_t len);
 bool jh7110_hdmi_is_connected(void);
+/* 1 connected, 0 disconnected, -1 unknown (no HPD GPIO). */
+int jh7110_hdmi_hpd_state(void);
+/* True if a sink answers DDC with a valid EDID header. */
+bool jh7110_hdmi_sink_present(void);
+/* Called on every HPD edge; cb must be able to sleep. */
+void jh7110_hdmi_set_hotplug_cb(void (*cb)(void *), void *arg);
 bool jh7110_hdmi_pixclock_supported(uint32_t pixclock);
 struct jh7110_hdmi_mode {
 	uint32_t	pixclock;	/* Hz */

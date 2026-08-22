@@ -16,6 +16,8 @@
 #include <sys/kernel.h>
 #include <sys/module.h>
 #include <sys/rman.h>
+#include <sys/gpio.h>
+#include <sys/taskqueue.h>
 
 #include <machine/bus.h>
 
@@ -25,6 +27,7 @@
 #include <dev/hwreset/hwreset.h>
 #include <dev/regulator/regulator.h>
 #include <dev/fdt/fdt_pinctrl.h>
+#include <dev/gpio/gpiobusvar.h>
 
 #include "jh7110_inno_hdmi.h"
 
@@ -83,6 +86,15 @@ static clk_t dc_pix_clk;
 static clk_t dc_hdmitx_pixclk;
 static hwreset_t hdmi_rst;
 static bool hdmi_probed = false;
+static gpio_pin_t hdmi_hpd_pin = NULL;
+static struct resource *hdmi_hpd_irq = NULL;
+static void *hdmi_hpd_cookie = NULL;
+static struct task hdmi_hpd_task;
+
+/* Time the line must be quiet before we believe it. */
+#define	HDMI_HPD_SETTLE_TICKS	(hz / 5)	/* 200 ms */
+static void (*hdmi_hpd_cb)(void *) = NULL;
+static void *hdmi_hpd_cb_arg = NULL;
 
 bool
 jh7110_hdmi_is_available(void)
@@ -103,6 +115,109 @@ jh7110_hdmi_is_available(void)
  * drives HPD weakly.
  */
 static bool hdmi_edid_seen = false;
+/*
+ * Hot-plug notification.
+ *
+ * The DRM bridge registers a callback here and we invoke it from a task
+ * whenever the HPD line changes, so a display swap is acted on immediately
+ * instead of waiting for DRM's 10 s output poll - which is long enough to
+ * miss a swap completed inside one interval, leaving the CRTC programmed for
+ * the mode of the display that was removed.
+ *
+ * The callback runs from a taskqueue rather than the interrupt handler
+ * because it ends in drm_kms_helper_hotplug_event(), which re-probes the
+ * connector and reads EDID over DDC - both of which sleep.
+ */
+void
+jh7110_hdmi_set_hotplug_cb(void (*cb)(void *), void *arg)
+{
+	hdmi_hpd_cb = cb;
+	hdmi_hpd_cb_arg = arg;
+}
+
+static void
+jh7110_hdmi_hpd_work(void *ctx, int pending)
+{
+	void (*cb)(void *);
+
+	cb = hdmi_hpd_cb;
+	if (cb != NULL)
+		cb(hdmi_hpd_cb_arg);
+}
+
+/*
+ * HPD edge.
+ *
+ * No debouncing, deliberately - StarFive's driver has none either. The line
+ * is not clean while a display is being driven: it carries activity at the
+ * video refresh rate, roughly 30 edges a second at 4K30. Suppressing that
+ * is the wrong layer to fix it at. The consumer calls
+ * drm_helper_hpd_irq_event(), which re-probes and emits an event only when
+ * the connector status actually changed, so spurious edges cost a re-probe
+ * and nothing more.
+ *
+ * FreeBSD's ithread model already gives what IRQF_ONESHOT gives Linux: the
+ * source is masked by PIC_PRE_ITHREAD until the handler returns, so edges
+ * cannot pile up.
+ */
+static void
+jh7110_hdmi_hpd_intr(void *arg)
+{
+
+	taskqueue_enqueue(taskqueue_thread, &hdmi_hpd_task);
+}
+
+/*
+ * Tri-state hot-plug read: 1 connected, 0 disconnected, -1 unknown.
+ *
+ * Deliberately touches only the GPIO and never an HDMI register. The
+ * connector's detect() can run at any time, including before anything has
+ * clocked the HDMI core, and reading that block while it is unclocked stalls
+ * the bus and wedges the SoC with no panic and no console output.
+ */
+/*
+ * Authoritative "is a sink attached" test: ask DDC.
+ *
+ * Hot-plug detect cannot be trusted on its own here. An MPI7002 panel drives
+ * the HPD pin high as expected, but an LG 4K on the same board and cable
+ * leaves it low the entire time it is attached and displaying - measured, not
+ * assumed. Reporting disconnected on that evidence would blank a working
+ * display, so a low HPD is treated as "ask DDC" rather than "absent".
+ *
+ * A sink that answers DDC with a valid EDID header is present no matter what
+ * HPD says. The read is bounded by EDID_POLL_ITERS and returns ETIMEDOUT when
+ * nothing is attached, so this still reports a genuine unplug.
+ */
+bool
+jh7110_hdmi_sink_present(void)
+{
+	static const uint8_t hdr[8] = {
+	    0x00, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x00
+	};
+	uint8_t blk[EDID_BLOCK_LEN];
+
+	if (!hdmi_probed)
+		return (false);
+	if (jh7110_hdmi_read_edid(blk, sizeof(blk)) != 0)
+		return (false);
+
+	return (memcmp(blk, hdr, sizeof(hdr)) == 0);
+}
+
+int
+jh7110_hdmi_hpd_state(void)
+{
+	bool active;
+
+	if (!hdmi_probed || hdmi_hpd_pin == NULL)
+		return (-1);
+
+	if (gpio_pin_is_active(hdmi_hpd_pin, &active) != 0)
+		return (-1);
+
+	return (active ? 1 : 0);
+}
+
 
 bool
 jh7110_hdmi_is_connected(void)
@@ -125,6 +240,16 @@ jh7110_hdmi_is_connected(void)
 		hwreset_deassert(hdmi_rst);
 	DELAY(1000);
 
+	/*
+	 * The controller's own hot-plug bit is the state source, as it is in
+	 * StarFive's driver: the GPIO supplies the interrupt, this register
+	 * supplies the answer. It is a debounced view maintained by the HDMI
+	 * block, where the raw pin can be sampled mid-bounce.
+	 *
+	 * This only works because the pad keeps its pin-group routing into
+	 * the controller (din 8). Claiming the pin as a plain GPIO rewrites
+	 * that and silently disconnects this bit.
+	 */
 	if ((HDMI_RD(HDMI_STATUS) & M_HOTPLUG) != 0)
 		return (true);
 
@@ -647,6 +772,77 @@ jh7110_inno_hdmi_attach(device_t dev)
 			device_printf(dev,
 			    "pinctrl 'default' not applied (%d); DDC/EDID "
 			    "will not work\n", perr);
+	}
+
+	/*
+	 * Grab the hot-plug detect GPIO. This has to happen after the pin
+	 * group is applied, because claiming the pin re-muxes it to plain
+	 * GPIO input - which is what we want, since the controller's own
+	 * hot-plug bit never asserts on this board.
+	 *
+	 * Failing to get it is not fatal: jh7110_hdmi_hpd_state() reports
+	 * "unknown" and the connector falls back to always reporting
+	 * connected, which is the behaviour before this pin was wired up.
+	 */
+	if (gpio_pin_get_by_ofw_property(dev, ofw_bus_get_node(dev),
+	    "hpd-gpios", &hdmi_hpd_pin) != 0) {
+		hdmi_hpd_pin = NULL;
+		device_printf(dev, "no hpd-gpios; hot-plug detect disabled\n");
+	} else {
+		int irqrid = 0;
+		int piclevel;
+
+		/*
+		 * Deliberately not re-muxed to a plain GPIO input.
+		 *
+		 * The pin group routes this pad into the HDMI controller
+		 * (din 8), which is what feeds the controller HDMI_STATUS
+		 * hot-plug bit. Claiming the pin as GPIO rewrites that
+		 * routing and silently disconnects it - the reason the bit
+		 * always read clear here. Linux leaves the mux alone and
+		 * takes the pad only as an interrupt source, which is what
+		 * we do now: the pinctrl configuration stands, and the pin
+		 * is used for its interrupt.
+		 */
+
+		/*
+		 * Requesting the interrupt is what first drives the GPIO
+		 * driver's PIC methods - mapping, configuring and unmasking
+		 * the pin. Keep that behind the same staging tunable so
+		 * "a PIC exists" can be tested separately from "something
+		 * uses it".
+		 */
+		piclevel = 5;
+		TUNABLE_INT_FETCH("hw.jh7110_gpio.pic", &piclevel);
+		if (piclevel < 5) {
+			goto no_hpd_irq;
+		}
+
+		/*
+		 * Take an interrupt on both edges: a plug and an unplug are
+		 * equally interesting, and which edge each produces depends
+		 * on the sink.
+		 */
+		TASK_INIT(&hdmi_hpd_task, 0, jh7110_hdmi_hpd_work, NULL);
+
+		hdmi_hpd_irq = gpio_alloc_intr_resource(dev, &irqrid,
+		    RF_ACTIVE, hdmi_hpd_pin, GPIO_INTR_EDGE_BOTH);
+		if (hdmi_hpd_irq == NULL) {
+			device_printf(dev,
+			    "no HPD interrupt; falling back to polling\n");
+		} else if (bus_setup_intr(dev, hdmi_hpd_irq,
+		    INTR_TYPE_MISC | INTR_MPSAFE, NULL, jh7110_hdmi_hpd_intr,
+		    NULL, &hdmi_hpd_cookie) != 0) {
+			device_printf(dev,
+			    "cannot set up HPD interrupt; polling\n");
+			bus_release_resource(dev, SYS_RES_IRQ, irqrid,
+			    hdmi_hpd_irq);
+			hdmi_hpd_irq = NULL;
+		} else {
+			device_printf(dev, "HPD interrupt enabled\n");
+		}
+no_hpd_irq:
+		;
 	}
 
 	DELAY(50000);

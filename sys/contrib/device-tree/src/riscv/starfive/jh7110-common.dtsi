@@ -824,10 +824,17 @@
 };
 
 &hdmi {
-	status = "okay";
-};
-
-&hdmi {
 	pinctrl-names = "default";
 	pinctrl-0 = <&hdmi_pins>;
+
+	/*
+	 * Hot-plug detect is brought out to GPIO15. The pin is also muxed
+	 * into the HDMI controller (din 8 in &hdmi_pins), but the
+	 * controller's own hot-plug status bit stays clear on this board
+	 * even with a sink attached, so the GPIO is the only reliable
+	 * source. StarFive's driver reads it the same way.
+	 */
+	hpd-gpios = <&sysgpio 15 GPIO_ACTIVE_HIGH>;
+
+	status = "okay";
 };
