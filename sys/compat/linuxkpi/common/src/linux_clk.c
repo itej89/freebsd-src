@@ -43,6 +43,8 @@ int lkpi_clk_prepare_enable(struct clk *clk);
 void lkpi_clk_disable_unprepare(struct clk *clk);
 int lkpi_clk_set_rate(struct clk *clk, unsigned long rate);
 unsigned long lkpi_clk_get_rate(struct clk *clk);
+int lkpi_clk_round_rate(struct clk *clk, unsigned long rate,
+    unsigned long *rounded);
 int lkpi_clk_set_parent(struct clk *clk, struct clk *parent);
 bool lkpi_clk_is_enabled(struct clk *clk);
 
@@ -247,6 +249,40 @@ lkpi_clk_set_rate(struct clk *c, unsigned long rate)
 	    CLK_SET_ROUND_ANY));
 #else
 	return (-ENOSYS);
+#endif
+}
+
+/*
+ * Ask the clock what it could give us, without changing it. Backs
+ * clk_round_rate(), which drivers use to validate a mode before committing
+ * to it.
+ */
+int
+lkpi_clk_round_rate(struct clk *c, unsigned long rate, unsigned long *rounded)
+{
+#ifdef FDT
+	struct lkpi_clk *lc;
+	uint64_t freq;
+	int error;
+
+	if (c == NULL || IS_ERR(c) || rounded == NULL)
+		return (EINVAL);
+
+	lc = LKPI_CLK(c);
+	freq = rate;
+	error = clk_set_freq(lc->bsd_clk, freq,
+	    CLK_SET_ROUND_ANY | CLK_SET_DRYRUN);
+	if (error != 0)
+		return (error);
+
+	error = clk_get_freq(lc->bsd_clk, &freq);
+	if (error != 0)
+		return (error);
+
+	*rounded = freq;
+	return (0);
+#else
+	return (ENOSYS);
 #endif
 }
 

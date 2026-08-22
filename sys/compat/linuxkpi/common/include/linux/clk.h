@@ -30,6 +30,8 @@ int lkpi_clk_prepare_enable(struct clk *clk);
 void lkpi_clk_disable_unprepare(struct clk *clk);
 int lkpi_clk_set_rate(struct clk *clk, unsigned long rate);
 unsigned long lkpi_clk_get_rate(struct clk *clk);
+int lkpi_clk_round_rate(struct clk *clk, unsigned long rate,
+    unsigned long *rounded);
 int lkpi_clk_set_parent(struct clk *clk, struct clk *parent);
 bool lkpi_clk_is_enabled(struct clk *clk);
 
@@ -120,6 +122,17 @@ clk_bulk_put(int num_clks, struct clk_bulk_data *clks)
 static inline long
 clk_round_rate(struct clk *clk, unsigned long rate)
 {
+
+	/*
+	 * Report what this clock would actually produce for the requested
+	 * rate, which is what callers ask for. Returning the current rate
+	 * instead - as this did - makes a driver believe every mode resolves
+	 * to whatever the clock happens to be set to, so it programs timing
+	 * for a rate the hardware is not running at.
+	 */
+	if (lkpi_clk_round_rate(clk, rate, &rate) == 0)
+		return (rate);
+
 	return (lkpi_clk_get_rate(clk));
 }
 
