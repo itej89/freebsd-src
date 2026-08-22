@@ -1248,10 +1248,12 @@
 				 <&voutcrg JH7110_VOUTCLK_DC8200_AXI>,
 				 <&voutcrg JH7110_VOUTCLK_DC8200_AHB>,
 				 <&voutcrg JH7110_VOUTCLK_DC8200_PIX0>,
-				 <&voutcrg JH7110_VOUTCLK_DC8200_PIX1>;
+				 <&voutcrg JH7110_VOUTCLK_DC8200_PIX1>,
+				 <&voutcrg JH7110_VOUTCLK_DOM_VOUT_TOP_LCD>;
 			clock-names = "noc_disp", "vout_src",
 				      "top_vout_axi", "top_vout_ahb",
-				      "core", "axi", "ahb", "pix0", "pix1";
+				      "core", "axi", "ahb", "pix0", "pix1",
+				      "vout_top_lcd";
 			resets = <&syscrg JH7110_SYSRST_VOUT_TOP_SRC>,
 				 <&voutcrg JH7110_VOUTRST_DC8200_CORE>,
 				 <&voutcrg JH7110_VOUTRST_DC8200_AXI>,

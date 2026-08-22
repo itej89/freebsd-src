@@ -81,7 +81,18 @@
 };
 
 &hdmitx0_pixelclk {
-	clock-frequency = <74250000>;
+	/*
+	 * 297 MHz, the value in StarFive's own device tree
+	 * (clock-frequency = <0x11b3dc40>).
+	 *
+	 * dc8200_pix0 parents from this fixed-clock, so the display
+	 * controller inherits the rate. Driving it at the old 74.25 MHz made
+	 * the picture look right, but that was compensating for a bug
+	 * elsewhere rather than being correct: the reference platform
+	 * renders properly with 297 MHz here, so anything that misrenders at
+	 * this value is our defect to find.
+	 */
+	clock-frequency = <297000000>;
 };
 
 &i2srx_bclk_ext {

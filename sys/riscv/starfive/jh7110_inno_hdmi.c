@@ -84,6 +84,7 @@ static clk_t hdmi_clks[8];
 static int hdmi_nclks;
 static clk_t dc_pix_clk;
 static clk_t dc_hdmitx_pixclk;
+static clk_t dc_lcd_clk;
 static hwreset_t hdmi_rst;
 static bool hdmi_probed = false;
 static gpio_pin_t hdmi_hpd_pin = NULL;
@@ -561,6 +562,10 @@ jh7110_hdmi_enable(const struct jh7110_hdmi_mode *mode)
 		clk_enable(dc_pix_clk);
 	}
 
+	/* Open the display output gate; see the lookup in attach. */
+	if (dc_lcd_clk != NULL)
+		clk_enable(dc_lcd_clk);
+
 	if (hdmi_rst != NULL)
 		hwreset_deassert(hdmi_rst);
 	DELAY(10000);
@@ -729,6 +734,17 @@ jh7110_inno_hdmi_attach(device_t dev)
 				dc_pix_clk = NULL;
 		}
 
+		/*
+		 * vout_top_lcd gates the display output path. Nothing else
+		 * claims it, and with it closed the PHY still produces valid
+		 * timing - so a monitor syncs - while no pixels reach it and
+		 * the screen stays black. Linux's dc8200 node lists this
+		 * clock and holds it enabled; ours did not list it at all.
+		 */
+		if (clk_get_by_ofw_name(dev, dc_node, "vout_top_lcd",
+		    &dc_lcd_clk) != 0)
+			dc_lcd_clk = NULL;
+
 		/* Get hdmitx0_pixelclk from HDMI node (clock-names "pclk") */
 		if (clk_get_by_ofw_name(dev, 0, "pclk",
 		    &dc_hdmitx_pixclk) != 0)
@@ -747,6 +763,23 @@ jh7110_inno_hdmi_attach(device_t dev)
 	 * covered this, but attach ordering is not guaranteed, so ask for it
 	 * explicitly; a second application is harmless.
 	 */
+	/*
+	 * Source mclk from the external 12.288 MHz oscillator, matching the
+	 * reference platform. The mux otherwise defaults to mclk_inner at
+	 * 49.5 MHz, which puts hdmi_tx_mclk and hdmi_tx_bclk at 49.5 MHz and
+	 * 12.375 MHz instead of 12.288 MHz and 3.072 MHz.
+	 */
+	{
+		clk_t mclk, mclk_ext;
+
+		if (clk_get_by_name(dev, "mclk", &mclk) == 0 &&
+		    clk_get_by_name(dev, "mclk_ext", &mclk_ext) == 0) {
+			if (clk_set_parent_by_clk(mclk, mclk_ext) != 0)
+				device_printf(dev,
+				    "cannot source mclk from mclk_ext\n");
+		}
+	}
+
 	/*
 	 * Claim the HDMI I/O rails, as StarFive's bind does. They are on
 	 * because U-Boot left them on, but nothing held a reference, so
