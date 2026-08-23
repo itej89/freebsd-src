@@ -1141,9 +1141,10 @@
 				 <&syscrg JH7110_SYSCLK_GPU_APB>,
 				 <&syscrg JH7110_SYSCLK_GPU_RTC_TOGGLE>,
 				 <&syscrg JH7110_SYSCLK_GPU_CORE>,
-				 <&syscrg JH7110_SYSCLK_NOC_BUS_GPU_AXI>;
+				 <&syscrg JH7110_SYSCLK_NOC_BUS_GPU_AXI>,
+				 <&pllclk JH7110_PLLCLK_PLL2_OUT>;
 			clock-names = "core", "sys", "apb",
-				      "rtc", "div", "axi";
+				      "rtc", "div", "axi", "pll";
 			resets = <&syscrg JH7110_SYSRST_GPU_APB>,
 				 <&syscrg JH7110_SYSRST_GPU_DOMA>;
 			reset-names = "apb", "doma";
