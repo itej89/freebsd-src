@@ -59,6 +59,18 @@ struct jh7110_clk_def {
 #define	JH7110_GATEDIV(_idx, _name, _pn, _d_max)			\
 	JH7110_CLK(_idx, _name, _pn, _d_max, JH7110_CLK_HAS_GATE |	\
 	JH7110_CLK_HAS_DIV)
+/*
+ * Gate + mux + divider in one node.
+ *
+ * The flags are a bitmask and the clknode methods already honour all three
+ * independently; only the macro was missing. perh_root needs it: it is a mux
+ * over {pll0_out, pll2_out} *and* a divider, and declaring it JH7110_GATEDIV
+ * left it without a mux method, so clknode_set_parent_by_name() returned
+ * ENXIO and it stayed stuck on pll0_out.
+ */
+#define	JH7110_GATEMUXDIV(_idx, _name, _pn, _d_max)			\
+	JH7110_CLK(_idx, _name, _pn, _d_max, JH7110_CLK_HAS_GATE |	\
+	JH7110_CLK_HAS_MUX | JH7110_CLK_HAS_DIV)
 #define JH7110_INV(_idx, _name, _pn)					\
 	JH7110_CLK(_idx, _name, _pn, 0, JH7110_CLK_HAS_INV)
 

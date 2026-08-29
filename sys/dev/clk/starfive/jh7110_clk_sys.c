@@ -114,10 +114,10 @@ static const char *uart45_core_p[] = { "perh_root" };
 static const char *pwmdac_apb_p[] = { "apb_bus" };
 static const char *pwmdac_core_p[] = { "audio_root" };
 static const char *spdif_apb_p[] = { "apb_bus" };
-static const char *spdif_core_p[] = { "apb_bus" };
+static const char *spdif_core_p[] = { "mclk" };
 static const char *tdm_ahb_p[] = { "ahb0" };
 static const char *tdm_apb_p[] = { "apb_bus" };
-static const char *tdm_internal_p[] = { "apb_bus" };
+static const char *tdm_internal_p[] = { "mclk" };
 static const char *pdm_apb_p[] = { "apb_bus" };
 static const char *jtag_trng_p[] = { "osc" };
 
@@ -141,7 +141,13 @@ static const char *gpu_sys_clk_p[] = { "isp_axi" };
 static const char *gpu_apb_p[] = { "apb_bus" };
 static const char *gpu_rtc_p[] = { "osc" };
 static const char *noc_gpu_p[] = { "gpu_core" };
-static const char *isp_2x_p[] = { "pll0_out" };
+/*
+ * isp_2x is fed from PLL2, not PLL0. The reference platform runs it at
+ * 594 MHz, which is 1188/2 and is unreachable from a 1000 MHz PLL0 with an
+ * integer divider. Getting this wrong leaves gpu_sys_clk - a gate off
+ * isp_axi, which divides isp_2x - at 250 MHz instead of 297.
+ */
+static const char *isp_2x_p[] = { "pll2_out" };
 static const char *isp_axi_p[] = { "isp_2x" };
 static const char *isp_top_core_p[] = { "isp_2x" };
 static const char *isp_top_axi_p[] = { "isp_axi" };
@@ -180,6 +186,19 @@ static const char *debug_p[] = { "cpu_bus" };
 static const char *trace_com_p[] = { "cpu_bus" };
 static const char *ddr_axi_p[] = { "ddr_bus" };
 static const char *axi_cfg0_main_p[] = { "axi_cfg0" };
+/*
+ * Parents corrected against the reference platform. Several nodes were
+ * declared with the parent array *of* another clock rather than an array
+ * naming it - e.g. int_ctrl_apb used apb_bus_p, which is {"stg_axiahb"}, so it
+ * ran at 198 MHz instead of apb_bus's 49.5 MHz.
+ */
+static const char *apb_bus_child_p[] = { "apb_bus" };
+static const char *axi_cfg0_main_div_p[] = { "ahb1" };
+static const char *axi_cfg0_hifi4_p[] = { "hifi4_axi" };
+static const char *axi_cfg1_main_p[] = { "isp_axi" };
+static const char *i2stx0_bclk_mst_inv_p[] = { "i2stx0_bclk_mst" };
+static const char *i2stx1_bclk_mst_inv_p[] = { "i2stx1_bclk_mst" };
+static const char *i2srx_bclk_mst_inv_p[] = { "i2srx_bclk_mst" };
 static const char *axi_cfg1_p[] = { "stg_axiahb" };
 static const char *aximem2_p[] = { "axi_cfg0" };
 
@@ -216,7 +235,10 @@ static const struct jh7110_clk_def sys_clks[] = {
 	JH7110_MUX(JH7110_SYSCLK_CPU_ROOT, "cpu_root", cpu_root_p),
 	JH7110_DIV(JH7110_SYSCLK_CPU_CORE, "cpu_core", cpu_core_p, 7),
 	JH7110_DIV(JH7110_SYSCLK_CPU_BUS, "cpu_bus", cpu_bus_p, 2),
-	JH7110_GATEDIV(JH7110_SYSCLK_PERH_ROOT, "perh_root", perh_root_p, 2),
+	/* mux over {pll0_out, pll2_out} as well as a divider - see
+	 * JH7110_GATEMUXDIV. The reference platform runs this from pll2_out
+	 * divided by 2 (594 MHz); 594 is unreachable from PLL0. */
+	JH7110_GATEMUXDIV(JH7110_SYSCLK_PERH_ROOT, "perh_root", perh_root_p, 2),
 	JH7110_MUX(JH7110_SYSCLK_BUS_ROOT, "bus_root", bus_root_p),
 
 	JH7110_GATE(JH7110_SYSCLK_APB0, "apb0", apb0_p),
@@ -288,8 +310,8 @@ static const struct jh7110_clk_def sys_clks[] = {
 	JH7110_GATEMUX(JH7110_SYSCLK_QSPI_REF, "qspi_ref", qspi_ref_p),
 
 	/* Misc (113-114) */
-	JH7110_GATE(JH7110_SYSCLK_MAILBOX_APB, "mailbox_apb", apb_bus_p),
-	JH7110_GATE(JH7110_SYSCLK_INT_CTRL_APB, "int_ctrl_apb", apb_bus_p),
+	JH7110_GATE(JH7110_SYSCLK_MAILBOX_APB, "mailbox_apb", apb_bus_child_p),
+	JH7110_GATE(JH7110_SYSCLK_INT_CTRL_APB, "int_ctrl_apb", apb_bus_child_p),
 
 	/* CAN (115-120) */
 	JH7110_GATE(JH7110_SYSCLK_CAN0_APB, "can0_apb", can_apb_p),
@@ -397,15 +419,15 @@ static const struct jh7110_clk_def sys_clks[] = {
 	JH7110_GATE(JH7110_SYSCLK_NOC_BUS_AXICFG0_AXI, "noc_bus_axicfg0_axi",
 	    axi_cfg0_main_p),
 	JH7110_GATE(JH7110_SYSCLK_AXI_CFG1_MAIN, "axi_cfg1_main",
-	    axi_cfg1_p),
+	    axi_cfg1_main_p),
 	JH7110_GATE(JH7110_SYSCLK_AXI_CFG1_AHB, "axi_cfg1_ahb",
 	    axi_cfg1_p),
 	JH7110_GATE(JH7110_SYSCLK_AXI_CFG0_MAIN_DIV, "axi_cfg0_main_div",
-	    axi_cfg0_main_p),
+	    axi_cfg0_main_div_p),
 	JH7110_GATE(JH7110_SYSCLK_AXI_CFG0_MAIN, "axi_cfg0_main",
 	    axi_cfg0_main_p),
 	JH7110_GATE(JH7110_SYSCLK_AXI_CFG0_HIFI4, "axi_cfg0_hifi4",
-	    axi_cfg0_main_p),
+	    axi_cfg0_hifi4_p),
 	JH7110_GATE(JH7110_SYSCLK_AXIMEM2_AXI, "aximem2_axi", aximem2_p),
 
 	/* GPU */
@@ -490,21 +512,21 @@ static const struct jh7110_clk_def sys_clks[] = {
 	JH7110_GATEDIV(JH7110_SYSCLK_I2STX0_BCLK_MST, "i2stx0_bclk_mst",
 	    i2stx0_bclk_mst_p, 32),
 	JH7110_INV(JH7110_SYSCLK_I2STX0_BCLK_MST_INV,
-	    "i2stx0_bclk_mst_inv", i2stx0_bclk_mst_p),
+	    "i2stx0_bclk_mst_inv", i2stx0_bclk_mst_inv_p),
 
 	/* I2S TX1 (skip MDIV for LRCK) */
 	JH7110_GATE(JH7110_SYSCLK_I2STX1_APB, "i2stx1_apb", i2stx1_apb_p),
 	JH7110_GATEDIV(JH7110_SYSCLK_I2STX1_BCLK_MST, "i2stx1_bclk_mst",
 	    i2stx1_bclk_mst_p, 32),
 	JH7110_INV(JH7110_SYSCLK_I2STX1_BCLK_MST_INV,
-	    "i2stx1_bclk_mst_inv", i2stx1_bclk_mst_p),
+	    "i2stx1_bclk_mst_inv", i2stx1_bclk_mst_inv_p),
 
 	/* I2S RX (skip MDIV for LRCK) */
 	JH7110_GATE(JH7110_SYSCLK_I2SRX_APB, "i2srx_apb", i2srx_apb_p),
 	JH7110_GATEDIV(JH7110_SYSCLK_I2SRX_BCLK_MST, "i2srx_bclk_mst",
 	    i2srx_bclk_mst_p, 32),
 	JH7110_INV(JH7110_SYSCLK_I2SRX_BCLK_MST_INV,
-	    "i2srx_bclk_mst_inv", i2srx_bclk_mst_p),
+	    "i2srx_bclk_mst_inv", i2srx_bclk_mst_inv_p),
 
 	/* PDM */
 	JH7110_GATEDIV(JH7110_SYSCLK_PDM_DMIC, "pdm_dmic", pdm_dmic_p, 64),
@@ -599,6 +621,92 @@ jh7110_clk_sys_attach(device_t dev)
 
 	if (clkdom_finit(sc->clkdom) != 0)
 		panic("Cannot finalize clkdom initialization\n");
+
+	/*
+	 * perh_root: select pll2_out, matching the reference platform.
+	 *
+	 * It is a mux over {pll0_out, pll2_out} and the hardware default lands
+	 * on pll0_out, giving 500 MHz. The reference runs it from pll2_out
+	 * divided by 2 for 594 MHz, which no integer divider can reach from
+	 * PLL0. The CAN and uart4/5 clocks hang off it - CAN was 62.5 MHz
+	 * against the reference 74.25 MHz purely because of this.
+	 *
+	 * Unlike the PLL0 rate this has no voltage dependency, so it is safe to
+	 * do at boot. hw.jh7110.perh_root_fix=0 opts out.
+	 */
+	{
+		struct clknode *perh;
+		char *ev = kern_getenv("hw.jh7110.perh_root_fix");
+		int want = 1;
+
+		if (ev != NULL) {
+			want = (int)strtoul(ev, NULL, 0);
+			freeenv(ev);
+		}
+
+		perh = want ? clknode_find_by_name("perh_root") : NULL;
+		if (perh != NULL) {
+			uint64_t rate = 0;
+			int perr = clknode_set_parent_by_name(perh, "pll2_out");
+
+			if (perr == 0)
+				perr = clknode_set_freq(perh, 594000000, 0, 0);
+			clknode_get_freq(perh, &rate);
+			device_printf(dev, "perh_root -> pll2_out, %ju Hz (err=%d)\n",
+			    (uintmax_t)rate, perr);
+		}
+	}
+
+	/*
+	 * Divider defaults that nothing else programs.
+	 *
+	 * On the reference platform these are set by the consumer drivers when
+	 * they probe. We have no consumers for them, so they keep whatever the
+	 * hardware reset value is and never reach the reference rate:
+	 *
+	 *   uart4/5_core   594 MHz / 2560 = 232 031 Hz   vs  594/10 = 59.4 MHz
+	 *
+	 * pwmdac_core is NOT listed here: its consumer sets it, and it lands on
+	 * the right rate now that jh7110_clk_set_freq() honours ROUND_DOWN.
+	 */
+	{
+		static const struct {
+			const char *name;
+			uint64_t rate;
+		} fixed[] = {
+			{ "uart4_core",  59400000 },
+			{ "uart5_core",  59400000 },
+		};
+		struct clknode *cn;
+		uint64_t got;
+		int i, ferr;
+
+		for (i = 0; i < nitems(fixed); i++) {
+			cn = clknode_find_by_name(fixed[i].name);
+			if (cn == NULL)
+				continue;
+			/*
+			 * Round rather than demand an exact hit: pwmdac_core
+			 * is 594 MHz / 49 = 12 122 448.98 Hz, which no exact
+			 * request can match, and CLK_SET_ROUND_EXACT leaves
+			 * the divider untouched.
+			 */
+			/*
+			 * enablecnt 1: pwmdac_core already has an enabled
+			 * consumer (the pwmdac driver), and clknode_set_freq()
+			 * refuses with EBUSY when enable_cnt exceeds the count
+			 * the caller accounts for. Setting it to the reference
+			 * rate is exactly what that consumer wants.
+			 */
+			ferr = clknode_set_freq(cn, fixed[i].rate,
+			    CLK_SET_ROUND_ANY, 1);
+			got = 0;
+			clknode_get_freq(cn, &got);
+			if (bootverbose || got != fixed[i].rate)
+				device_printf(dev, "%s -> %ju Hz (err=%d)\n",
+				    fixed[i].name, (uintmax_t)got, ferr);
+		}
+	}
 
 	if (bootverbose)
 		clkdom_dump(sc->clkdom);

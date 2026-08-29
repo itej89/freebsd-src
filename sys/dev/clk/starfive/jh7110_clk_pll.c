@@ -10,6 +10,7 @@
 
 #include <sys/param.h>
 #include <sys/systm.h>
+#include <sys/sysctl.h>
 #include <sys/bus.h>
 #include <sys/kernel.h>
 #include <sys/module.h>
@@ -22,6 +23,7 @@
 #include <dev/ofw/ofw_bus_subr.h>
 
 #include <dev/clk/clk.h>
+#include <dev/regulator/regulator.h>
 #include <dev/clk/starfive/jh7110_clk.h>
 #include <dev/clk/starfive/jh7110_clk_pll.h>
 #include <dev/syscon/syscon.h>
@@ -384,3 +386,188 @@ jh7110_clk_pll_register(struct clkdom *clkdom, struct jh7110_clk_def *clkdef)
 
 	return (0);
 }
+
+
+/*
+ * PLL0 rate, applied late.
+ *
+ * We leave PLL0 at U-Boot's 1000 MHz; the reference platform runs it at
+ * 1500 MHz, and that single difference cascades into dozens of downstream
+ * clock mismatches (see docs/study/soc/01-soc-glue-parity.md).
+ *
+ * cpu_core divides straight off cpu_root/pll0_out, so raising PLL0 raises the
+ * CPU clock, and the reference OPP table requires more voltage to run there:
+ *
+ *     375 / 500 / 750 MHz -> 900 000 uV
+ *     1500 MHz            -> 1 040 000 uV
+ *
+ * vdd-cpu sits at 900 000 uV, so the rail must come up FIRST. That regulator
+ * lives on the AXP15060, which is behind i2c and attaches long after this
+ * clock driver, so this runs from a late SYSINIT rather than from attach.
+ *
+ *   hw.jh7110.pll0_hz=1500000000   opt in
+ *   hw.jh7110.vdd_cpu_uv=<uV>      override the target voltage
+ */
+static void
+jh7110_pll0_apply_tunable(void *dummy __unused)
+{
+	struct clknode *pll0;
+	regulator_t vdd_cpu;
+	char *ev;
+	uint64_t want, got = 0;
+	int uv_target = 1040000, uv_now = 0, error;
+
+	ev = kern_getenv("hw.jh7110.pll0_hz");
+	if (ev == NULL)
+		return;
+	want = strtoul(ev, NULL, 0);
+	freeenv(ev);
+	if (want == 0)
+		return;
+
+	ev = kern_getenv("hw.jh7110.vdd_cpu_uv");
+	if (ev != NULL) {
+		uv_target = (int)strtoul(ev, NULL, 0);
+		freeenv(ev);
+	}
+
+	pll0 = clknode_find_by_name("pll0_out");
+	if (pll0 == NULL) {
+		printf("jh7110_pll0: pll0_out clknode not found\n");
+		return;
+	}
+
+	/* Voltage first, and only ever upwards from here. */
+	error = regulator_get_by_name(root_bus, "vdd-cpu", &vdd_cpu);
+	if (error != 0) {
+		printf("jh7110_pll0: vdd-cpu regulator not found (%d), "
+		    "refusing to raise PLL0\n", error);
+		return;
+	}
+	regulator_get_voltage(vdd_cpu, &uv_now);
+	if (uv_now < uv_target) {
+		error = regulator_set_voltage(vdd_cpu, uv_target, uv_target);
+		if (error != 0) {
+			printf("jh7110_pll0: vdd-cpu %d -> %d uV FAILED (%d), "
+			    "refusing to raise PLL0\n", uv_now, uv_target, error);
+			return;
+		}
+		regulator_get_voltage(vdd_cpu, &uv_now);
+		printf("jh7110_pll0: vdd-cpu now %d uV\n", uv_now);
+	}
+	if (uv_now < uv_target) {
+		printf("jh7110_pll0: vdd-cpu still %d uV (< %d), "
+		    "refusing to raise PLL0\n", uv_now, uv_target);
+		return;
+	}
+
+	error = clknode_set_freq(pll0, want, 0, 0);
+	clknode_get_freq(pll0, &got);
+	printf("jh7110_pll0: requested %ju Hz, got %ju Hz (err=%d)\n",
+	    (uintmax_t)want, (uintmax_t)got, error);
+
+	/*
+	 * Restore the clocks that must hold an exact rate regardless of the
+	 * parent.
+	 *
+	 * usb_125m is a plain divider off pll0_out sized for a 1000 MHz parent
+	 * (1000/8). Raising PLL0 drags it to 187.5 MHz, and USB 3.0 needs
+	 * exactly 125 MHz - on this board that is also the WiFi dongle. The
+	 * reference platform reaches the same 125 MHz as 1500/12, so ask for
+	 * the rate and let the divider follow.
+	 */
+	{
+		struct clknode *usb = clknode_find_by_name("usb_125m");
+		uint64_t urate = 0;
+
+		if (usb != NULL) {
+			int uerr = clknode_set_freq(usb, 125000000, 0, 0);
+
+			clknode_get_freq(usb, &urate);
+			printf("jh7110_pll0: usb_125m now %ju Hz (err=%d)\n",
+			    (uintmax_t)urate, uerr);
+		}
+	}
+}
+
+/*
+ * perh_root: wrong parent, same bug as gpu_root and isp_2x.
+ *
+ * perh_root is a mux over {pll0_out, pll2_out}. We select pll0_out; the
+ * reference platform selects pll2_out and divides by 2 for 594 MHz, which is
+ * unreachable from PLL0 by an integer divider. uart4_core, uart5_core and the
+ * CAN clocks all hang off it, which is why they are the residue that raising
+ * PLL0 alone cannot fix:
+ *
+ *     perh_root   ours 500 MHz (pll0/2)   reference 594 MHz (pll2/2)
+ *     uart4/5     ours 195312 Hz          reference 59 400 000 Hz
+ *
+ * Not the console UART - that is uart0 off the 24 MHz oscillator - so this is
+ * safe to change on a live system.
+ */
+static void
+jh7110_perh_root_fix(void)
+{
+	struct clknode *perh;
+	uint64_t got = 0;
+	int error;
+
+	perh = clknode_find_by_name("perh_root");
+	if (perh == NULL) {
+		printf("jh7110_perh: perh_root clknode not found\n");
+		return;
+	}
+
+	error = clknode_set_parent_by_name(perh, "pll2_out");
+	if (error != 0) {
+		printf("jh7110_perh: reparent to pll2_out failed (%d)\n", error);
+		return;
+	}
+
+	error = clknode_set_freq(perh, 594000000, 0, 0);
+	clknode_get_freq(perh, &got);
+	printf("jh7110_perh: perh_root now %ju Hz (err=%d)\n",
+	    (uintmax_t)got, error);
+}
+/*
+ * Deliberately NOT a SYSINIT.
+ *
+ * This ran at SI_SUB_LAST, immediately after "Trying to mount root" and
+ * before init produces any output. PLL0 feeds qspi_ref, the UART clocks and
+ * the peripheral bus, so raising it there took out console and storage
+ * together and left the board unbootable - every subsequent boot re-applied
+ * the tunable from loader.conf, so the only way back in was the serial
+ * loader prompt or pulling the SD card.
+ *
+ * Apply it from userland instead (sysctl hw.jh7110.pll0_apply=1), where a bad
+ * outcome costs one reboot rather than bricking every boot.
+ */
+
+/*
+ * Same routine, triggerable at runtime:  sysctl hw.jh7110.pll0_apply=1
+ *
+ * The PMIC is behind i2c and the boot-time SYSINIT may run before transfers
+ * to it are reliable. Being able to re-run the sequence from userland tells
+ * the two failure modes apart.
+ */
+static int
+jh7110_pll0_apply_sysctl(SYSCTL_HANDLER_ARGS)
+{
+	int val = 0, error;
+
+	error = sysctl_handle_int(oidp, &val, 0, req);
+	if (error != 0 || req->newptr == NULL)
+		return (error);
+	if (val != 0) {
+		jh7110_pll0_apply_tunable(NULL);
+		jh7110_perh_root_fix();
+	}
+	return (0);
+}
+
+static SYSCTL_NODE(_hw, OID_AUTO, jh7110, CTLFLAG_RD | CTLFLAG_MPSAFE, 0,
+    "StarFive JH7110");
+SYSCTL_PROC(_hw_jh7110, OID_AUTO, pll0_apply,
+    CTLTYPE_INT | CTLFLAG_WR | CTLFLAG_MPSAFE, NULL, 0,
+    jh7110_pll0_apply_sysctl, "I",
+    "Write 1 to apply hw.jh7110.pll0_hz (raises vdd-cpu first)");

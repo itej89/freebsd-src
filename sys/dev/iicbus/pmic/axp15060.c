@@ -41,6 +41,13 @@
 #include "iicbus_if.h"
 #include "regdev_if.h"
 
+static int axp15060_single_write = 0;
+SYSCTL_INT(_hw, OID_AUTO, axp15060_single_write,
+    CTLFLAG_RWTUN, &axp15060_single_write, 0,
+    "Send PMIC register writes as one i2c transaction (the correct form). "
+    "Off by default: writes to this PMIC have never landed, so enabling "
+    "them changes behaviour on every rail at once.");
+
 static MALLOC_DEFINE(M_AXP15060_REG, "AXP15060 regulator",
     "AXP15060 regulator allocations");
 
@@ -249,20 +256,51 @@ axp15060_write(device_t dev, uint8_t reg, uint8_t val)
 {
 	struct axp15060_softc *sc = device_get_softc(dev);
 	struct iic_msg msgs[2];
+	uint8_t buf[2];
 	int error;
 
 	mtx_lock(&sc->mtx);
 
+	/*
+	 * Register and value must go out as ONE transaction:
+	 *
+	 *     START addr+W  reg  val  STOP
+	 *
+	 * This was previously two separate IIC_M_WR messages, which the bus
+	 * emits as two independent transactions - the second one writes the
+	 * data byte as if it were a register pointer, so the intended
+	 * register is never updated. Every write to this PMIC silently did
+	 * nothing while returning success.
+	 */
+	buf[0] = reg;
+	buf[1] = val;
 	msgs[0].slave = sc->addr;
 	msgs[0].flags = IIC_M_WR;
-	msgs[0].len = 1;
-	msgs[0].buf = &reg;
-	msgs[1].slave = sc->addr;
-	msgs[1].flags = IIC_M_WR;
-	msgs[1].len = 1;
-	msgs[1].buf = &val;
+	msgs[0].len = sizeof(buf);
+	msgs[0].buf = buf;
 
-	error = iicbus_transfer(dev, msgs, 2);
+	/*
+	 * hw.axp15060.single_write gates the fix during bring-up.
+	 *
+	 * Writes to this PMIC have never worked, so nothing on this board has
+	 * ever depended on them landing. Turning them all on at once at boot
+	 * is a large behaviour change on rails that include the CPU supply, so
+	 * default to the old (inert) path and let the corrected transaction be
+	 * enabled deliberately once it has been exercised at runtime.
+	 */
+	if (!axp15060_single_write) {
+		msgs[0].len = 1;
+		msgs[0].buf = &buf[0];
+		msgs[1].slave = sc->addr;
+		msgs[1].flags = IIC_M_WR;
+		msgs[1].len = 1;
+		msgs[1].buf = &buf[1];
+		error = iicbus_transfer(dev, msgs, 2);
+		mtx_unlock(&sc->mtx);
+		return (error);
+	}
+
+	error = iicbus_transfer(dev, msgs, 1);
 
 	mtx_unlock(&sc->mtx);
 	return (error);
@@ -420,12 +458,33 @@ axp15060_regnode_set_voltage(struct regnode *regnode, int min_uvolt,
 	if (error != 0)
 		return (error);
 
-	axp15060_read(sc->base_dev, sc->def->voltage_reg, &val);
+	/*
+	 * Propagate i2c errors. These were previously discarded, so a failed
+	 * transfer still returned success and the caller believed a voltage
+	 * change had happened when the register was untouched.
+	 */
+	error = axp15060_read(sc->base_dev, sc->def->voltage_reg, &val);
+	if (error != 0) {
+		printf("axp15060: %s: read reg 0x%02x failed (%d)\n",
+		    sc->def->name, sc->def->voltage_reg, error);
+		return (error);
+	}
 	val &= ~sc->def->voltage_mask;
 	val |= (sel & sc->def->voltage_mask);
-	axp15060_write(sc->base_dev, sc->def->voltage_reg, val);
+	error = axp15060_write(sc->base_dev, sc->def->voltage_reg, val);
+	if (error != 0) {
+		printf("axp15060: %s: write reg 0x%02x = 0x%02x failed (%d)\n",
+		    sc->def->name, sc->def->voltage_reg, val, error);
+		return (error);
+	}
 
-	*udelay = 0;
+	/*
+	 * Settling time. Callers sleep for this after a change, and raising a
+	 * rail before raising a clock off it is only safe once the new voltage
+	 * has actually arrived. 1 ms covers the DCDC ramp across the full
+	 * range with margin.
+	 */
+	*udelay = 1000;
 	return (0);
 }
 
@@ -434,6 +493,13 @@ static regnode_method_t axp15060_regnode_methods[] = {
 	REGNODEMETHOD(regnode_enable,		axp15060_regnode_enable),
 	REGNODEMETHOD(regnode_status,		axp15060_regnode_status),
 	REGNODEMETHOD(regnode_get_voltage,	axp15060_regnode_get_voltage),
+	/*
+	 * set_voltage was implemented but never registered, so every
+	 * regulator on this PMIC was read-only and regulator_set_voltage()
+	 * failed. Without it the CPU voltage cannot be raised, and the CPU
+	 * cannot leave the 900 mV / 1 GHz operating point.
+	 */
+	REGNODEMETHOD(regnode_set_voltage,	axp15060_regnode_set_voltage),
 	REGNODEMETHOD(regnode_check_voltage,	regnode_method_check_voltage),
 	REGNODEMETHOD_END
 };

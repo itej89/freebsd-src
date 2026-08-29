@@ -221,7 +221,31 @@ jh7110_clk_set_freq(struct clknode *clk, uint64_t fin, uint64_t *fout,
 	if ((sc_clk->flags & JH7110_CLK_HAS_DIV) == 0)
 		return (0);
 
-	divisor = MIN(MAX(DIV_ROUND_CLOSEST(fin, *fout), 1UL), sc_clk->d_max);
+	/*
+	 * Honour the caller's rounding direction.
+	 *
+	 * This always rounded to nearest, ignoring CLK_SET_ROUND_UP/DOWN, so a
+	 * ROUND_DOWN request could come back *above* the rate asked for. The
+	 * pwmdac driver asks for mclk+64 = 12 288 064 Hz ROUND_DOWN off a
+	 * 594 MHz parent: nearest gives divisor 48 -> 12 375 000 Hz (too high),
+	 * where the correct answer is divisor 49 -> 12 122 448 Hz, which is
+	 * what the reference platform runs.
+	 *
+	 * A larger divisor means a lower frequency, so ROUND_DOWN takes the
+	 * ceiling of the division and ROUND_UP the floor.
+	 */
+	switch (flags & (CLK_SET_ROUND_UP | CLK_SET_ROUND_DOWN)) {
+	case CLK_SET_ROUND_DOWN:
+		divisor = howmany(fin, *fout);
+		break;
+	case CLK_SET_ROUND_UP:
+		divisor = fin / *fout;
+		break;
+	default:
+		divisor = DIV_ROUND_CLOSEST(fin, *fout);
+		break;
+	}
+	divisor = MIN(MAX(divisor, 1UL), sc_clk->d_max);
 
 	if (flags & CLK_SET_DRYRUN)
 		goto done;
@@ -234,7 +258,14 @@ jh7110_clk_set_freq(struct clknode *clk, uint64_t fin, uint64_t *fout,
 	DEVICE_UNLOCK(clk);
 
 done:
-	*fout = divisor;
+	/*
+	 * The framework expects the resulting frequency here, not the divisor
+	 * that produced it. Returning the divisor made clknode_set_freq()
+	 * report a nonsense rate to its caller (and to a CLK_SET_DRYRUN
+	 * probe, which is how the framework decides whether a rate is
+	 * reachable at all).
+	 */
+	*fout = fin / divisor;
 	*done = 1;
 
 	return (0);

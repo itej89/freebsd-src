@@ -182,7 +182,35 @@ jh7110_pmu_attach(device_t dev)
 			device_printf(dev, "VOUT power domain enabled\n");
 	}
 
-	/* Power on GPU domain */
+	/*
+	 * Power on GPU domain.
+	 *
+	 * Debian does NOT do this: there, the GPU device is the domain's genpd
+	 * consumer and the island follows it, so CURR_POWER_MODE cycles with
+	 * the GPUA bit clear while the GPU is idle ("GPUA off-0 /
+	 * 18000000.gpu suspended"). Forcing it on here leaves us pinned at
+	 * 0x17 with no consumer able to release it.
+	 *
+	 * pvr now acquires this domain itself (pvr_device.c), so the force is
+	 * only a fallback. hw.jh7110_pmu.force_gpua=0 hands ownership fully to
+	 * the consumer, matching the reference platform.
+	 */
+	{
+		char *ev = kern_getenv("hw.jh7110_pmu.force_gpua");
+		int force = 1;
+
+		if (ev != NULL) {
+			force = (int)strtoul(ev, NULL, 0);
+			freeenv(ev);
+		}
+		if (!force) {
+			device_printf(dev,
+			    "GPU power domain left to its consumer "
+			    "(hw.jh7110_pmu.force_gpua=0)\n");
+			goto skip_gpua;
+		}
+	}
+
 	if (!(status & (1 << JH7110_PD_GPUA))) {
 		error = jh7110_pmu_set_domain(sc, JH7110_PD_GPUA, true);
 		if (error != 0)
@@ -191,6 +219,7 @@ jh7110_pmu_attach(device_t dev)
 			device_printf(dev, "GPU power domain enabled\n");
 	}
 
+skip_gpua:
 	pwrdom_register_ofw_provider(dev);
 
 	return (0);
