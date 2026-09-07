@@ -34,6 +34,11 @@ struct platform_device {
 	void			*pwrdom;
 };
 
+struct platform_device_id {
+	char		name[20];
+	unsigned long	driver_data;
+};
+
 struct platform_driver {
 	int  (*probe)(struct platform_device *);
 	void (*remove)(struct platform_device *);
@@ -41,6 +46,7 @@ struct platform_driver {
 	struct device_driver	driver;
 	driver_t		bsddriver;
 	devclass_t		bsdclass;
+	const struct platform_device_id *id_table;
 };
 
 #define	to_platform_device(d) \

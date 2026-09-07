@@ -102,6 +102,12 @@ struct device_type {
 	const char	*name;
 };
 
+struct device_dma_parameters {
+	unsigned int max_segment_size;
+	unsigned int min_align_mask;
+	unsigned long segment_boundary_mask;
+};
+
 struct device {
 	struct device	*parent;
 	struct list_head irqents;
@@ -137,6 +143,9 @@ struct device {
 	struct list_head devres_head;
 
 	struct dev_pm_info	power;
+	/* DDK (pvrsrvkm) needs these; see vf2-ddk-mesa-test scripts/ddk-port. */
+	u64		*dma_mask;
+	struct device_dma_parameters *dma_parms;
 };
 
 extern struct device linux_root_device;

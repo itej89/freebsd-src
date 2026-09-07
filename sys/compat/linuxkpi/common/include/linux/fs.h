@@ -111,6 +111,8 @@ struct linux_file {
 	struct linux_cdev *f_cdev;
 
 	struct rcu_head	rcu;
+	/* DDK (pvrsrvkm) uses f_mapping for unmap_mapping_range. */
+	struct address_space *f_mapping;
 };
 
 #define	file		linux_file

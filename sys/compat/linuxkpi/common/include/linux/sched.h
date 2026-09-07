@@ -67,6 +67,8 @@
 struct seq_file;
 
 struct work_struct;
+#define	PF_DUMPCORE	0x00000200
+
 struct task_struct {
 	struct thread *task_thread;
 	struct mm_struct *mm;
@@ -90,6 +92,8 @@ struct task_struct {
 	struct task_struct *group_leader;
 	unsigned rcu_section[TS_RCU_TYPE_MAX];
 	unsigned int fpu_ctx_level;
+	/* DDK (pvrsrvkm) reads task flags. */
+	unsigned int	flags;
 };
 
 #define	current	({ \
