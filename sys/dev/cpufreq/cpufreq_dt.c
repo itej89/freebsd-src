@@ -33,6 +33,7 @@
 #include <sys/bus.h>
 #include <sys/rman.h>
 #include <sys/kernel.h>
+#include <sys/limits.h>
 #include <sys/module.h>
 #include <sys/cpu.h>
 #include <sys/cpuset.h>
@@ -69,6 +70,19 @@ struct cpufreq_dt_opp {
 };
 
 #define	CPUFREQ_DT_HAVE_REGULATOR(sc)	((sc)->reg != NULL)
+
+/*
+ * Voltage requests are "at least uvolt_min", not "exactly".
+ *
+ * Every CPU sharing an OPP table attaches its own cpufreq_dt and so holds its
+ * own consumer handle on the one supply. The regulator framework only grants
+ * a range that overlaps every other consumer's last request, so with exact
+ * requests the first CPU to move is refused (its siblings still pin the old
+ * voltage). With open-ended requests the rail settles at the highest demand:
+ * it rises with the first CPU to go up, before that CPU's clock does, and
+ * drops only once the last one has come down.
+ */
+#define	CPUFREQ_DT_UV_ANY_ABOVE	INT_MAX
 
 struct cpufreq_dt_softc {
 	device_t dev;
@@ -250,7 +264,7 @@ cpufreq_dt_set(device_t dev, const struct cf_setting *set)
 		    uvolt, opp->uvolt_target);
 		error = regulator_set_voltage(sc->reg,
 		    opp->uvolt_min,
-		    opp->uvolt_max);
+		    CPUFREQ_DT_UV_ANY_ABOVE);
 		if (error != 0) {
 			DPRINTF(dev, "Failed, backout\n");
 			return (ENXIO);
@@ -267,7 +281,8 @@ cpufreq_dt_set(device_t dev, const struct cf_setting *set)
 		 * so use the value read on entry.
 		 */
 		if (CPUFREQ_DT_HAVE_REGULATOR(sc) && uvolt != 0)
-			(void)regulator_set_voltage(sc->reg, uvolt, uvolt);
+			(void)regulator_set_voltage(sc->reg, uvolt,
+			    CPUFREQ_DT_UV_ANY_ABOVE);
 		return (ENXIO);
 	}
 
@@ -276,7 +291,7 @@ cpufreq_dt_set(device_t dev, const struct cf_setting *set)
 		    uvolt, opp->uvolt_target);
 		error = regulator_set_voltage(sc->reg,
 		    opp->uvolt_min,
-		    opp->uvolt_max);
+		    CPUFREQ_DT_UV_ANY_ABOVE);
 		if (error != 0) {
 			DPRINTF(dev, "Failed to switch regulator to %d\n",
 			    opp->uvolt_target);
