@@ -617,10 +617,16 @@ jh7110_clk_sys_probe(device_t dev)
 static void
 jh7110_pll0_boot_rate(device_t dev)
 {
-	/* Parents before children: gmac_src before its ptp/phy dividers. */
+	/*
+	 * Parents before children: gmac_src before its ptp/phy dividers.
+	 *
+	 * gpu_core is not listed: the GPU driver sets its own rate when it
+	 * probes, and its reset-default /3 (333 MHz off 1000) has no exact
+	 * equivalent off 1500 anyway.
+	 */
 	static const char *const keep[] = {
 		"usb_125m", "gmac_src", "gmac0_gtxclk", "gmac1_gtxclk",
-		"qspi_ref_src", "wave511_vce", "gpu_core", "gclk0",
+		"qspi_ref_src", "wave511_vce", "gclk0",
 	};
 	struct clknode *pll0, *cpu_root, *cpu_core, *cn;
 	uint64_t want, rate[nitems(keep)], got;
