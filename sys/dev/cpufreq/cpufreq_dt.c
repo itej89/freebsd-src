@@ -179,6 +179,8 @@ cpufreq_dt_set(device_t dev, const struct cf_setting *set)
 	uint64_t freq;
 	int uvolt, error;
 
+	copp = NULL;
+
 	sc = device_get_softc(dev);
 
 	DPRINTF(dev, "Working on cpu %d\n", sc->cpu);
@@ -259,11 +261,13 @@ cpufreq_dt_set(device_t dev, const struct cf_setting *set)
 	error = clk_set_freq(sc->clk, opp->freq, CLK_SET_ROUND_DOWN);
 	if (error != 0) {
 		DPRINTF(dev, "Failed, backout\n");
-		/* Restore previous voltage (best effort) */
-		if (CPUFREQ_DT_HAVE_REGULATOR(sc))
-			error = regulator_set_voltage(sc->reg,
-			    copp->uvolt_min,
-			    copp->uvolt_max);
+		/*
+		 * Restore the voltage we started with (best effort). copp is
+		 * only set when the voltage had to be derived from the table,
+		 * so use the value read on entry.
+		 */
+		if (CPUFREQ_DT_HAVE_REGULATOR(sc) && uvolt != 0)
+			(void)regulator_set_voltage(sc->reg, uvolt, uvolt);
 		return (ENXIO);
 	}
 
@@ -276,8 +280,13 @@ cpufreq_dt_set(device_t dev, const struct cf_setting *set)
 		if (error != 0) {
 			DPRINTF(dev, "Failed to switch regulator to %d\n",
 			    opp->uvolt_target);
-			/* Restore previous CPU frequency (best effort) */
-			(void)clk_set_freq(sc->clk, copp->freq, 0);
+			/*
+			 * Restore the frequency we started with (best effort).
+			 * This used copp->freq, and copp is uninitialised on the
+			 * normal path: the clock was set to garbage (the
+			 * VisionFive 2 ended up at its 1/7 divider, 142 MHz).
+			 */
+			(void)clk_set_freq(sc->clk, freq, CLK_SET_ROUND_DOWN);
 			return (ENXIO);
 		}
 	}
@@ -457,7 +466,13 @@ cpufreq_dt_oppv2_parse(struct cpufreq_dt_softc *sc, phandle_t node)
 		if (OF_hasprop(opp_table, "opp-suspend"))
 			sc->opp[i].opp_suspend = true;
 
-		if (CPUFREQ_DT_HAVE_REGULATOR(sc)) {
+		/*
+		 * Read the voltages whenever the CPU node names a supply, not
+		 * only when the regulator was already found: it is looked up
+		 * again at the first frequency change, and every OPP would
+		 * otherwise say 0 uV -- which reads as "lower the voltage".
+		 */
+		if (CPUFREQ_DT_HAVE_REGULATOR(sc) || sc->supply_prop != NULL) {
 			nvolt = OF_getencprop_alloc_multi(opp_table,
 			    "opp-microvolt", sizeof(*volts), (void **)&volts);
 			if (nvolt == 1) {
