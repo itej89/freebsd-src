@@ -13,6 +13,7 @@
 #include <sys/systm.h>
 #include <sys/bus.h>
 #include <sys/kernel.h>
+#include <sys/limits.h>
 #include <sys/module.h>
 #include <sys/mutex.h>
 #include <sys/resource.h>
@@ -581,6 +582,131 @@ jh7110_clk_sys_probe(device_t dev)
 	return (BUS_PROBE_DEFAULT);
 }
 
+/*
+ * PLL0 to 1500 MHz at attach, the way the reference platform runs it.
+ *
+ * U-Boot leaves PLL0 at 1000 MHz. The CPU OPP table (375/500/750/1500 MHz)
+ * is built for a 1500 MHz PLL0 with cpu_core as a /4../1 divider, so at
+ * 1000 MHz the CPU is stuck at 1 GHz and cpufreq's levels do not match the
+ * hardware. Linux keeps PLL0 at 1500 MHz permanently and does DVFS with the
+ * cpu_core divider plus vdd-cpu.
+ *
+ * Two earlier attempts changed PLL0 from a late SYSINIT and from a sysctl
+ * and hung the board. That code reprogrammed the PLL while the CPU was
+ * clocked from it, and moved only usb_125m back, so Ethernet, QSPI and the
+ * GPU clock all jumped by 1.5x under running drivers.
+ *
+ * This does what Linux's PLL0 rate-change notifier does
+ * (clk-starfive-jh7110-sys.c), at the one point where no consumer is
+ * running yet:
+ *
+ *   1. park cpu_root on the oscillator (a glitch-free mux), so the CPU is
+ *      never clocked by a relocking PLL;
+ *   2. set cpu_core to /2, so it comes back at 750 MHz -- an OPP that needs
+ *      only the 900 mV vdd-cpu already has. No PMIC write is involved;
+ *   3. reprogram PLL0 and give it time to lock;
+ *   4. put cpu_root back on PLL0;
+ *   5. put every other PLL0 consumer back to the rate it had before, with
+ *      a divider sized for the new parent (all reachable exactly: 125 MHz is
+ *      1500/12, 500 MHz 1500/3, 100 MHz 1500/15, 25 MHz 750/30).
+ *
+ * Opt in with hw.jh7110.pll0_boot_hz=1500000000. Test it with
+ * `nextboot -e hw.jh7110.pll0_boot_hz=1500000000` so a failure costs one
+ * power cycle, never a reflash.
+ */
+static void
+jh7110_pll0_boot_rate(device_t dev)
+{
+	/* Parents before children: gmac_src before its ptp/phy dividers. */
+	static const char *const keep[] = {
+		"usb_125m", "gmac_src", "gmac0_gtxclk", "gmac1_gtxclk",
+		"qspi_ref_src", "wave511_vce", "gpu_core", "gclk0",
+	};
+	struct clknode *pll0, *cpu_root, *cpu_core, *cn;
+	uint64_t want, rate[nitems(keep)], got;
+	const char *orig_parent;
+	char *ev;
+	int i, error;
+
+	ev = kern_getenv("hw.jh7110.pll0_boot_hz");
+	if (ev == NULL)
+		return;
+	want = strtouq(ev, NULL, 0);
+	freeenv(ev);
+	if (want != 1500000000ULL) {
+		device_printf(dev, "pll0_boot: only 1500000000 is supported\n");
+		return;
+	}
+
+	pll0 = clknode_find_by_name("pll0_out");
+	cpu_root = clknode_find_by_name("cpu_root");
+	cpu_core = clknode_find_by_name("cpu_core");
+	if (pll0 == NULL || cpu_root == NULL || cpu_core == NULL) {
+		device_printf(dev, "pll0_boot: clock nodes missing\n");
+		return;
+	}
+	if (clknode_get_freq(pll0, &got) == 0 && got == want) {
+		device_printf(dev, "pll0_boot: PLL0 already %ju Hz\n",
+		    (uintmax_t)got);
+		return;
+	}
+	if (clknode_get_parent(cpu_root) != pll0) {
+		device_printf(dev, "pll0_boot: cpu_root not on pll0_out, "
+		    "leaving it alone\n");
+		return;
+	}
+
+	for (i = 0; i < nitems(keep); i++) {
+		rate[i] = 0;
+		cn = clknode_find_by_name(keep[i]);
+		if (cn != NULL)
+			clknode_get_freq(cn, &rate[i]);
+	}
+
+	/* 1. CPU off the PLL. */
+	orig_parent = clknode_get_name(pll0);
+	error = clknode_set_parent_by_name(cpu_root, "osc");
+	if (error != 0) {
+		device_printf(dev, "pll0_boot: cpu_root -> osc failed (%d), "
+		    "PLL0 unchanged\n", error);
+		return;
+	}
+
+	/* 2. cpu_core /2, so the CPU returns at want/2 = 750 MHz. */
+	error = clknode_set_freq(cpu_core, 24000000 / 2, 0, INT_MAX);
+	if (error != 0) {
+		device_printf(dev, "pll0_boot: cpu_core /2 failed (%d), "
+		    "PLL0 unchanged\n", error);
+		clknode_set_parent_by_name(cpu_root, orig_parent);
+		return;
+	}
+
+	/* 3. PLL0, then let it lock. */
+	error = clknode_set_freq(pll0, want, 0, INT_MAX);
+	DELAY(20000);
+
+	/* 4. CPU back on PLL0 whatever happened: it is at /2 either way. */
+	clknode_set_parent_by_name(cpu_root, orig_parent);
+	clknode_get_freq(pll0, &got);
+	device_printf(dev, "pll0_boot: PLL0 %ju Hz (err=%d)\n",
+	    (uintmax_t)got, error);
+	clknode_get_freq(cpu_core, &got);
+	device_printf(dev, "pll0_boot: cpu_core %ju Hz\n", (uintmax_t)got);
+
+	/* 5. Everyone else back to where they were. */
+	for (i = 0; i < nitems(keep); i++) {
+		if (rate[i] == 0 ||
+		    (cn = clknode_find_by_name(keep[i])) == NULL)
+			continue;
+		error = clknode_set_freq(cn, rate[i], 0, INT_MAX);
+		got = 0;
+		clknode_get_freq(cn, &got);
+		device_printf(dev, "pll0_boot: %s %ju Hz%s (err=%d)\n",
+		    keep[i], (uintmax_t)got,
+		    got == rate[i] ? "" : " MISMATCH", error);
+	}
+}
+
 static int
 jh7110_clk_sys_attach(device_t dev)
 {
@@ -707,6 +833,8 @@ jh7110_clk_sys_attach(device_t dev)
 				    fixed[i].name, (uintmax_t)got, ferr);
 		}
 	}
+
+	jh7110_pll0_boot_rate(dev);
 
 	if (bootverbose)
 		clkdom_dump(sc->clkdom);

@@ -408,7 +408,7 @@ jh7110_clk_pll_register(struct clkdom *clkdom, struct jh7110_clk_def *clkdef)
  *   hw.jh7110.pll0_hz=1500000000   opt in
  *   hw.jh7110.vdd_cpu_uv=<uV>      override the target voltage
  */
-static void
+static void __unused
 jh7110_pll0_apply_tunable(void *dummy __unused)
 {
 	struct clknode *pll0;
@@ -505,7 +505,7 @@ jh7110_pll0_apply_tunable(void *dummy __unused)
  * Not the console UART - that is uart0 off the 24 MHz oscillator - so this is
  * safe to change on a live system.
  */
-static void
+static void __unused
 jh7110_perh_root_fix(void)
 {
 	struct clknode *perh;
@@ -558,9 +558,16 @@ jh7110_pll0_apply_sysctl(SYSCTL_HANDLER_ARGS)
 	error = sysctl_handle_int(oidp, &val, 0, req);
 	if (error != 0 || req->newptr == NULL)
 		return (error);
+	/*
+	 * Disabled. This reprograms PLL0 while the CPU is clocked from it and
+	 * moves only usb_125m back, so Ethernet, QSPI and the GPU clock jump
+	 * under running drivers. The safe path is hw.jh7110.pll0_boot_hz,
+	 * applied in jh7110_clk_sys attach (jh7110_pll0_boot_rate()).
+	 */
 	if (val != 0) {
-		jh7110_pll0_apply_tunable(NULL);
-		jh7110_perh_root_fix();
+		printf("jh7110_pll0: pll0_apply is disabled; use "
+		    "hw.jh7110.pll0_boot_hz at boot\n");
+		return (EOPNOTSUPP);
 	}
 	return (0);
 }

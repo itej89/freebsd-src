@@ -479,6 +479,32 @@ axp15060_regnode_set_voltage(struct regnode *regnode, int min_uvolt,
 	}
 
 	/*
+	 * Read it back. With hw.axp15060_single_write=0 the write above goes
+	 * out in the old, inert two-transaction form and returns success
+	 * without changing anything. cpufreq_dt raises vdd-cpu and then the
+	 * CPU clock on the strength of that success, so an inert write here
+	 * would run the CPU at 1500 MHz on 900 mV. Report the truth instead,
+	 * and cpufreq_dt backs out.
+	 */
+	{
+		uint8_t check;
+
+		error = axp15060_read(sc->base_dev, sc->def->voltage_reg,
+		    &check);
+		if (error != 0)
+			return (error);
+		if ((check & sc->def->voltage_mask) !=
+		    (sel & sc->def->voltage_mask)) {
+			printf("axp15060: %s: reg 0x%02x reads 0x%02x after "
+			    "writing 0x%02x -- not applied%s\n",
+			    sc->def->name, sc->def->voltage_reg, check, val,
+			    axp15060_single_write ? "" :
+			    " (hw.axp15060_single_write=0)");
+			return (EIO);
+		}
+	}
+
+	/*
 	 * Settling time. Callers sleep for this after a change, and raising a
 	 * rail before raising a clock off it is only safe once the new voltage
 	 * has actually arrived. 1 ms covers the DCDC ramp across the full
