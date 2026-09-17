@@ -74,6 +74,14 @@ struct cpufreq_dt_softc {
 	device_t dev;
 	clk_t clk;
 	regulator_t reg;
+	/*
+	 * The CPU node names a supply, so voltages matter. The regulator may
+	 * not exist yet when we attach (a PMIC behind i2c attaches after the
+	 * CPUs), so it is looked up again when a frequency change is asked
+	 * for, and the change is refused while it is still missing.
+	 */
+	phandle_t node;
+	char *supply_prop;
 
 	struct cpufreq_dt_opp *opp;
 	ssize_t nopp;
@@ -183,6 +191,22 @@ cpufreq_dt_set(device_t dev, const struct cf_setting *set)
 	if (clk_get_freq(sc->clk, &freq) != 0) {
 		device_printf(dev, "Can't get current clk freq\n");
 		return (ENXIO);
+	}
+
+	/*
+	 * The node names a supply we did not find at attach. Changing the
+	 * frequency without it would raise the clock without raising the
+	 * voltage, so look again, and refuse while it is still missing.
+	 */
+	if (!CPUFREQ_DT_HAVE_REGULATOR(sc) && sc->supply_prop != NULL) {
+		if (regulator_get_by_ofw_property(dev, sc->node,
+		    sc->supply_prop, &sc->reg) == 0) {
+			device_printf(dev, "Found %s\n", sc->supply_prop);
+		} else {
+			device_printf(dev, "%s still not available; refusing "
+			    "to change frequency\n", sc->supply_prop);
+			return (ENXIO);
+		}
 	}
 
 	/*
@@ -498,12 +522,21 @@ cpufreq_dt_attach(device_t dev)
 	 * quite yet.  If it's operating-points-v2 then regulator
 	 * and voltage entries are optional.
 	 */
+	sc->node = node;
+	sc->supply_prop = NULL;
+	if (OF_hasprop(node, "cpu-supply"))
+		sc->supply_prop = __DECONST(char *, "cpu-supply");
+	else if (OF_hasprop(node, "cpu0-supply"))
+		sc->supply_prop = __DECONST(char *, "cpu0-supply");
 	if (regulator_get_by_ofw_property(dev, node, "cpu-supply",
 	    &sc->reg) == 0)
 		device_printf(dev, "Found cpu-supply\n");
 	else if (regulator_get_by_ofw_property(dev, node, "cpu0-supply",
 	    &sc->reg) == 0)
 		device_printf(dev, "Found cpu0-supply\n");
+	else if (sc->supply_prop != NULL)
+		device_printf(dev, "%s not available yet; frequency changes "
+		    "wait for it\n", sc->supply_prop);
 
 	/*
 	 * Determine which operating mode we're in.  Error out if we expect
