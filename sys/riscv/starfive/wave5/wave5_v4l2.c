@@ -647,11 +647,58 @@ wave5_fh_stop(struct wave5_fh *fh)
 {
 	struct vpu_instance *inst = fh->inst;
 	uint32_t fail_res = 0;
+	int ret, i;
 
 	if (!fh->opened || inst == NULL)
 		return;
 
-	wave5_vpu_dec_close(inst, &fail_res);
+	/*
+	 * Quiesce the instance before closing it.
+	 *
+	 * wave5_vpu_dec_close() asks the firmware to finish the sequence and,
+	 * if the instance is still running, retries and finally gives up with
+	 * -ETIMEDOUT. The instance then stays open *in the firmware* for
+	 * good, and the next open times out -- which made the decoder work
+	 * exactly once per boot. Every test here rebooted first, so the bug
+	 * hid until two clients were run back to back.
+	 */
+	fh->out.streaming = false;
+	fh->cap.streaming = false;
+
+	/*
+	 * A client that exits mid-stream -- a player killed part way through,
+	 * or anything that simply closes the fd -- leaves the firmware with a
+	 * picture in flight, and the close then fails with
+	 * WAVE5_SYSERR_VPU_STILL_RUNNING (fail_res 0x1000). One flush is not
+	 * always enough, so flush and retry; each attempt gives the firmware
+	 * another chance to retire what it is holding.
+	 */
+	for (i = 0; i < 5; i++) {
+		if (fh->fbs_ready)
+			wave5_vpu_flush_instance(inst);
+
+		fail_res = 0;
+		ret = wave5_vpu_dec_close(inst, &fail_res);
+		if (ret == 0)
+			break;
+		if (fail_res != WAVE5_SYSERR_VPU_STILL_RUNNING)
+			break;
+		pause("wave5cls", hz / 20);
+	}
+	if (ret != 0)
+		device_printf(fh->sc->bsddev,
+		    "video0: decoder close failed after %d attempts: %d "
+		    "(fail_res %#x) -- the firmware instance may be stuck\n",
+		    i + 1, ret, fail_res);
+
+	/*
+	 * The compressed reference framebuffers are allocated by
+	 * wave5_dec_register_fbs() and are ours to release; the linear output
+	 * buffers belong to the capture queue and are freed with it.
+	 */
+	for (i = 0; i < fh->non_linear && i < MAX_REG_FRAME; i++)
+		wave5_vpu_dec_reset_framebuffer(inst, i);
+
 	mutex_lock(&fh->vdev->dev_lock);
 	list_del(&inst->list);
 	mutex_unlock(&fh->vdev->dev_lock);
@@ -661,6 +708,7 @@ wave5_fh_stop(struct wave5_fh *fh)
 	fh->inst = NULL;
 	fh->opened = false;
 	fh->seq_done = false;
+	fh->fbs_ready = false;
 }
 
 /*
