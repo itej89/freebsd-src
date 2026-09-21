@@ -74,7 +74,7 @@ CTASSERT(sizeof(struct v4l2_format) == 208);
 CTASSERT(sizeof(struct v4l2_capability) == 104);
 
 #define	WAVE5_MAX_BUFS		32
-#define	WAVE5_BITSTREAM_SIZE	(4 * 1024 * 1024)
+#define	WAVE5_BITSTREAM_SIZE	(8 * 1024 * 1024)
 #define	WAVE5_OUTBUF_SIZE	(1024 * 1024)
 
 /* mmap offsets: each buffer gets a distinct page-aligned window. */
@@ -1012,15 +1012,57 @@ wave5_qbuf(struct wave5_fh *fh, struct v4l2_buffer *v)
 		 * so it is small relative to a frame.
 		 */
 		if (b->bytesused > 0) {
-			if (fh->bs_used + b->bytesused > fh->bitstream.size)
-				fh->bs_used = 0;
 			const uint8_t *src = (const uint8_t *)(b->uncached !=
 			    NULL ? b->uncached : b->vb.vaddr);
+			size_t ring = fh->bitstream.size;
+			size_t off, first;
+			dma_addr_t rd = 0, wr = 0;
+			size_t room = 0;
+
+			if (b->bytesused > ring)
+				return (EINVAL);
+
+			/*
+			 * Back-pressure, not overwrite.
+			 *
+			 * This used to reset the write offset to zero
+			 * whenever a packet would not fit, which clobbered
+			 * bitstream the decoder had not read yet. A clip
+			 * smaller than the ring never wrapped and decoded
+			 * perfectly; a 19 MB clip through a 4 MB ring wrapped
+			 * five times and silently lost frames (298 of 300).
+			 * Enlarging the ring only moves the cliff -- a real
+			 * film is gigabytes.
+			 *
+			 * The firmware reports how much room it actually has,
+			 * so ask, and refuse the packet when it will not fit.
+			 * EAGAIN is the right answer: ffmpeg keeps the packet
+			 * and retries it on the next iteration rather than
+			 * treating it as an error.
+			 */
+			if (wave5_vpu_dec_get_bitstream_buffer(fh->inst, &rd,
+			    &wr, &room) != 0)
+				return (EIO);
+			if (room < b->bytesused)
+				return (EAGAIN);
+
+			/* A ring really does wrap: split the copy at the end. */
+			off = fh->bs_used % ring;
+			first = MIN((size_t)b->bytesused, ring - off);
 
 			err = wave5_vdi_write_memory(fh->vdev, &fh->bitstream,
-			    fh->bs_used, __DECONST(u8 *, src), b->bytesused);
+			    off, __DECONST(u8 *, src), first);
 			if (err < 0)
 				return (EIO);
+			if (first < b->bytesused) {
+				err = wave5_vdi_write_memory(fh->vdev,
+				    &fh->bitstream, 0,
+				    __DECONST(u8 *, src + first),
+				    b->bytesused - first);
+				if (err < 0)
+					return (EIO);
+			}
+
 			fh->bs_used += b->bytesused;
 			wave5_vpu_dec_update_bitstream_buffer(fh->inst,
 			    b->bytesused);
