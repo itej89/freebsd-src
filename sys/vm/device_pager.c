@@ -353,6 +353,26 @@ dev_pager_dealloc(vm_object_t object)
 
 			dev_pager_free_page(object, m);
 		}
+	} else if (object->type == OBJT_MGTDEVICE) {
+		/*
+		 * A managed device object normally holds only real managed
+		 * pages, and vm_object_terminate_pages() has already dealt
+		 * with those. LinuxKPI's fault path can additionally insert
+		 * *fictitious* pages, for physical addresses that have no
+		 * vm_page -- on RISC-V, the SiFive L2 uncached alias used for
+		 * GPU buffers. vm_page_free_prep() deliberately leaves a
+		 * fictitious page's struct alone, so those are handed to this
+		 * pager on devp_pglist and released here. The list is empty
+		 * for every other managed device object.
+		 */
+		while ((m = TAILQ_FIRST(&object->un_pager.devp.devp_pglist))
+		    != NULL) {
+			TAILQ_REMOVE(&object->un_pager.devp.devp_pglist, m,
+			    plinks.q);
+			if (!vm_page_busy_acquire(m, VM_ALLOC_WAITFAIL))
+				continue;
+			vm_page_putfake(m);
+		}
 	}
 	object->handle = NULL;
 	object->type = OBJT_DEAD;

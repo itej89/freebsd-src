@@ -566,16 +566,42 @@ retry:
 			 * Create a fictitious page so the pmap maps
 			 * the userspace PTE at the uncached address.
 			 */
-			page = vm_page_alloc_noobj(VM_ALLOC_WIRED);
+			/*
+			 * A fictitious page is the right thing here: it names
+			 * an arbitrary physical address without consuming a
+			 * real page, and vm_page_free_prep() never returns one
+			 * to the physical allocator. It comes back xbusy with
+			 * ref_count 1, which is the state this function leaves
+			 * pages in on the ordinary path below.
+			 *
+			 * Do NOT go back to allocating a real page and
+			 * overwriting phys_addr: such a page cannot be freed
+			 * (the address no longer names it), which is why the
+			 * original had to wire it, and wired pages are skipped
+			 * by vm_object_terminate_single_page() -- one leaked
+			 * page per fault, about 200 a second under a GPU
+			 * desktop. linux_cdev_pager_dtor() releases these.
+			 */
+			page = vm_page_getfake(IDX_TO_OFF(pfn),
+			    pgprot2cachemode(prot));
 			if (page == NULL)
 				return (VM_FAULT_OOM);
-			page->phys_addr = IDX_TO_OFF(pfn);
-			vm_page_valid(page);
 			if (vm_page_insert(page, vm_obj, pindex) != 0) {
-				vm_page_unwire_noq(page);
-				vm_page_free(page);
+				vm_page_putfake(page);
 				return (VM_FAULT_OOM);
 			}
+			/*
+			 * Hand ownership to the device pager, exactly as the
+			 * OBJT_DEVICE path does with its fake pages.
+			 * vm_object_terminate_pages() runs *before*
+			 * dev_pager_dealloc() and detaches every page without
+			 * freeing a fictitious one, so the object is empty by
+			 * the time the pager could look; this list is what
+			 * survives to be drained there.
+			 */
+			TAILQ_INSERT_TAIL(&vm_obj->un_pager.devp.devp_pglist,
+			    page, plinks.q);
+			vm_page_valid(page);
 			vma->vm_pfn_count++;
 			return (VM_FAULT_NOPAGE);
 		}
