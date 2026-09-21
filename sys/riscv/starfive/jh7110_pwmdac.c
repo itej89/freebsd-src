@@ -14,6 +14,8 @@
 #include <sys/systm.h>
 #include <sys/bus.h>
 #include <sys/callout.h>
+#include <sys/sysctl.h>
+#include <sys/firmware.h>
 #include <sys/kernel.h>
 #include <sys/lock.h>
 #include <sys/module.h>
@@ -97,6 +99,17 @@ jh7110_pwmdac_probe(device_t dev)
 	return (BUS_PROBE_DEFAULT);
 }
 
+/*
+ * Diagnostic attenuation, as a right shift. The jack is far louder than
+ * the sample scale suggests, so this is deliberately quiet by default and
+ * adjustable without a rebuild.
+ */
+static int pwmdac_atten = 8;		/* >>8, about -48 dB */
+
+static int jh7110_pwmdac_testtone(SYSCTL_HANDLER_ARGS);
+static int jh7110_pwmdac_playclip(SYSCTL_HANDLER_ARGS);
+static int jh7110_pwmdac_datamode(SYSCTL_HANDLER_ARGS);
+
 static int
 jh7110_pwmdac_attach(device_t dev)
 {
@@ -134,6 +147,37 @@ jh7110_pwmdac_attach(device_t dev)
 	device_printf(dev, "PWMDAC audio at 0x%lx\n",
 	    rman_get_start(sc->res));
 
+	/*
+	 * DIAGNOSTIC: dev.pwmdac.0.testtone=<seconds> plays a paced 440 Hz
+	 * tone straight to the DAC, bypassing the pcm layer. The ordinary
+	 * playback path delivers samples with no pacing, so nearly all of
+	 * them are overwritten before conversion; this establishes whether
+	 * that is the whole story and whether the DAC's own configuration is
+	 * right. Busy-waits a core -- diagnostic only.
+	 */
+	SYSCTL_ADD_PROC(device_get_sysctl_ctx(dev),
+	    SYSCTL_CHILDREN(device_get_sysctl_tree(dev)), OID_AUTO,
+	    "testtone", CTLTYPE_INT | CTLFLAG_WR | CTLFLAG_MPSAFE, sc, 0,
+	    jh7110_pwmdac_testtone, "I",
+	    "play a paced 440 Hz test tone for N seconds (diagnostic)");
+
+	SYSCTL_ADD_PROC(device_get_sysctl_ctx(dev),
+	    SYSCTL_CHILDREN(device_get_sysctl_tree(dev)), OID_AUTO,
+	    "playclip", CTLTYPE_INT | CTLFLAG_WR | CTLFLAG_MPSAFE, sc, 0,
+	    jh7110_pwmdac_playclip, "I",
+	    "play /boot/firmware/pwmdac_clip.raw, paced (diagnostic)");
+
+	SYSCTL_ADD_INT(device_get_sysctl_ctx(dev),
+	    SYSCTL_CHILDREN(device_get_sysctl_tree(dev)), OID_AUTO,
+	    "atten", CTLFLAG_RW, &pwmdac_atten, 0,
+	    "diagnostic attenuation as a right shift (higher = quieter)");
+
+	SYSCTL_ADD_PROC(device_get_sysctl_ctx(dev),
+	    SYSCTL_CHILDREN(device_get_sysctl_tree(dev)), OID_AUTO,
+	    "datamode_inv", CTLTYPE_INT | CTLFLAG_RW | CTLFLAG_MPSAFE, sc, 0,
+	    jh7110_pwmdac_datamode, "I",
+	    "MSB inversion: 1 = signed input (correct), 0 = unsigned");
+
 	return (0);
 }
 
@@ -152,7 +196,15 @@ jh7110_pwmdac_dai_init(device_t dev, uint32_t format)
 
 	sc = device_get_softc(dev);
 
-	ctrl = CTRL_SHIFT_8BIT | CTRL_DUTY_CENTER |
+	/*
+	 * CTRL_DATA_MODE_INV inverts the MSB, turning signed two's-complement
+	 * samples into the offset binary the PWM comparator expects. Linux
+	 * sets the same thing (data_mode = INVERTER_DATA_MSB). Without it the
+	 * DAC reads signed data as unsigned: a quiet sine sits near zero where
+	 * -1 is 0xFFFF, i.e. full scale, so attenuating the signal makes the
+	 * output *louder* and turns it into a square wave.
+	 */
+	ctrl = CTRL_SHIFT_8BIT | CTRL_DUTY_CENTER | CTRL_DATA_MODE_INV |
 	    (1 << CTRL_CNT_N_SHIFT);
 	PWMDAC_WR(sc, PWMDAC_CTRL, ctrl);
 
@@ -160,6 +212,159 @@ jh7110_pwmdac_dai_init(device_t dev, uint32_t format)
 }
 
 static void jh7110_pwmdac_callout(void *arg);
+
+/*
+ * DIAGNOSTIC: paced test tone. See the header of add-testtone.py.
+ *
+ * Writes a 440 Hz sine directly to WDATA at 48 kHz, one stereo frame every
+ * ~20.8 us. The ordinary playback path pushes samples with no pacing at all,
+ * so nearly all of them are overwritten before conversion; if that is the
+ * whole story, this should sound clean.
+ *
+ * Busy-waits a core for the requested number of seconds. Diagnostic only.
+ */
+static int
+jh7110_pwmdac_testtone(SYSCTL_HANDLER_ARGS)
+{
+	struct jh7110_pwmdac_softc *sc = arg1;
+	static const int16_t sine[] = {
+		0, 1886, 3765, 5631, 7476, 9296, 11083, 12832, 14536, 16191,
+		17789, 19327, 20798, 22197, 23520, 24762, 25917, 26983, 27955,
+		28830, 29604, 30274, 30838, 31294, 31639, 31873, 31994, 32003,
+		31899, 31683, 31356, 30920, 30376, 29727, 28976, 28126, 27181,
+		26146, 25025, 23823, 22546, 21199, 19789, 18322, 16805, 15245,
+		13648, 12023, 10376, 8716, 7050, 5385, 3730, 2091, 477,
+		-1106, -2651, -4152, -5603, -6998, -8331, -9597, -10791,
+		-11908, -12943, -13893, -14753, -15521, -16193, -16768,
+		-17243, -17617, -17889, -18059, -18127, -18093, -17959,
+		-17727, -17398, -16976, -16463, -15864, -15182, -14423,
+		-13591, -12692, -11732, -10717, -9654, -8549, -7410, -6244,
+		-5058, -3861, -2659, -1461, -274, 894, 2037, 3147, 4219,
+		5245, 6220, 7138, 7993, 8780, 9494, 10131, 10687, 11159
+	};
+	int secs = 0, err, i, frames;
+	uint32_t ctrl;
+
+	err = sysctl_handle_int(oidp, &secs, 0, req);
+	if (err != 0 || req->newptr == NULL)
+		return (err);
+	if (secs <= 0)
+		return (0);
+	if (secs > 10)
+		secs = 10;
+
+	device_printf(sc->dev, "test tone: 440 Hz, %d s, paced at 48 kHz\n",
+	    secs);
+
+	PWMDAC_LOCK(sc);
+	ctrl = PWMDAC_RD(sc, PWMDAC_CTRL);
+	PWMDAC_WR(sc, PWMDAC_CTRL, ctrl | CTRL_ENABLE);
+	PWMDAC_UNLOCK(sc);
+
+	frames = 48000 * secs;
+	for (i = 0; i < frames; i++) {
+		int16_t v = sine[i % nitems(sine)] >> pwmdac_atten;
+		uint32_t frame = ((uint32_t)(uint16_t)v) |
+		    ((uint32_t)(uint16_t)v << 16);
+
+		PWMDAC_WR(sc, PWMDAC_WDATA, frame);
+		DELAY(20);		/* ~48 kHz; the DAC needs 20.8 us */
+	}
+
+	device_printf(sc->dev, "test tone: done (%d frames)\n", frames);
+
+	return (0);
+}
+
+/*
+ * DIAGNOSTIC: play a raw clip, paced the way the hardware needs.
+ *
+ * Same idea as the test tone but with real audio, so the result can be judged
+ * on music. The clip is raw 48 kHz S16_LE stereo at
+ * /boot/firmware/pwmdac_clip.raw (firmware(9) resolves the name to that path).
+ *
+ * Attenuated by 18 dB: the full-scale tone was far too loud.
+ */
+/*
+ * Toggle the MSB inversion live, so its effect can be heard directly.
+ */
+static int
+jh7110_pwmdac_datamode(SYSCTL_HANDLER_ARGS)
+{
+	struct jh7110_pwmdac_softc *sc = arg1;
+	uint32_t ctrl;
+	int val, err;
+
+	PWMDAC_LOCK(sc);
+	ctrl = PWMDAC_RD(sc, PWMDAC_CTRL);
+	PWMDAC_UNLOCK(sc);
+	val = (ctrl & CTRL_DATA_MODE_INV) ? 1 : 0;
+
+	err = sysctl_handle_int(oidp, &val, 0, req);
+	if (err != 0 || req->newptr == NULL)
+		return (err);
+
+	PWMDAC_LOCK(sc);
+	ctrl = PWMDAC_RD(sc, PWMDAC_CTRL);
+	if (val)
+		ctrl |= CTRL_DATA_MODE_INV;
+	else
+		ctrl &= ~CTRL_DATA_MODE_INV;
+	PWMDAC_WR(sc, PWMDAC_CTRL, ctrl);
+	PWMDAC_UNLOCK(sc);
+
+	return (0);
+}
+
+static int
+jh7110_pwmdac_playclip(SYSCTL_HANDLER_ARGS)
+{
+	struct jh7110_pwmdac_softc *sc = arg1;
+	const struct firmware *fw;
+	const int16_t *pcm;
+	uint32_t ctrl;
+	size_t frames, i;
+	int go = 0, err;
+
+	err = sysctl_handle_int(oidp, &go, 0, req);
+	if (err != 0 || req->newptr == NULL)
+		return (err);
+	if (go == 0)
+		return (0);
+
+	fw = firmware_get("pwmdac_clip.raw");
+	if (fw == NULL) {
+		device_printf(sc->dev,
+		    "playclip: /boot/firmware/pwmdac_clip.raw not found\n");
+		return (ENOENT);
+	}
+
+	pcm = (const int16_t *)fw->data;
+	frames = fw->datasize / 4;		/* 2 channels x 16 bit */
+	device_printf(sc->dev, "playclip: %zu frames (%zu ms)\n",
+	    frames, frames * 1000 / 48000);
+
+	PWMDAC_LOCK(sc);
+	ctrl = PWMDAC_RD(sc, PWMDAC_CTRL);
+	PWMDAC_WR(sc, PWMDAC_CTRL, ctrl | CTRL_ENABLE);
+	PWMDAC_UNLOCK(sc);
+
+	for (i = 0; i < frames; i++) {
+		int16_t l = pcm[i * 2] >> pwmdac_atten;
+		int16_t r = pcm[i * 2 + 1] >> pwmdac_atten;
+		uint32_t frame = ((uint32_t)(uint16_t)l) |
+		    ((uint32_t)(uint16_t)r << 16);
+
+		PWMDAC_WR(sc, PWMDAC_WDATA, frame);
+		DELAY(19);	/* ~20.8 us including loop overhead */
+	}
+
+	device_printf(sc->dev, "playclip: done\n");
+	firmware_put(fw, FIRMWARE_UNLOAD);
+
+	return (0);
+}
+
 
 static int
 jh7110_pwmdac_dai_trigger(device_t dev, int go, int pcm_dir)
