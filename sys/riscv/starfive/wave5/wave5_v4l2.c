@@ -44,6 +44,8 @@
 #include <sys/queue.h>
 #include <sys/uio.h>
 #include <sys/fcntl.h>
+#include <sys/kthread.h>
+#include <sys/proc.h>
 #include <sys/filio.h>
 
 #include <machine/bus.h>
@@ -84,6 +86,16 @@ struct wave5_buf {
 	struct vpu_buf		vb;
 	uint32_t		bytesused;
 	uint32_t		offset;		/* mmap cookie */
+	/*
+	 * A kernel view of the same pages through the L2 bypass alias.
+	 * Userspace maps these buffers uncached (mmap hands out the alias),
+	 * so its writes go straight to DRAM. Reading them back through the
+	 * ordinary cached kernel mapping can be served by a stale line and
+	 * yields data the application never wrote -- which showed up as the
+	 * decoder failing to find a sequence header in a perfectly good
+	 * stream.
+	 */
+	void			*uncached;
 	int			index;
 	bool			queued;		/* owned by the driver */
 	bool			done;		/* ready for DQBUF */
@@ -121,6 +133,37 @@ struct wave5_fh {
 	bool			draining;
 	int			dec_errors;
 	int			dq_spins;
+
+	/*
+	 * Decoding runs in its own thread rather than only inside DQBUF.
+	 * ffmpeg opens the device non-blocking and waits in poll(), so if a
+	 * frame were only ever produced by a DQBUF call, poll() would never
+	 * become ready and nothing would call DQBUF -- a deadlock that looks
+	 * exactly like a hung decoder.
+	 */
+	struct thread		*worker;
+	bool			worker_run;
+	bool			fbs_ready;
+	bool			sent_last;
+	bool			eos_signalled;
+	int			last_disp;
+	int			frames_out;
+
+	/*
+	 * Presentation timestamps, carried from the coded buffers to the
+	 * frames they produce. Without this every frame comes out stamped
+	 * zero and a muxer discards them as duplicates -- ffmpeg reported
+	 * "frame=3 drop=28" while the decoder had correctly produced all 30.
+	 *
+	 * Decode order and display order coincide for streams without
+	 * B-frames, which is what a first implementation needs to get right;
+	 * reordering would need the timestamp attached to the picture rather
+	 * than taken from a queue.
+	 */
+	struct timeval		ts_fifo[64];
+	unsigned int		ts_head;
+	unsigned int		ts_tail;
+	int			idle_polls;
 };
 
 static d_open_t		wave5_v4l2_open;
@@ -138,6 +181,7 @@ static struct cdevsw wave5_v4l2_cdevsw = {
 };
 
 static void wave5_fh_stop(struct wave5_fh *fh);
+static void wave5_worker(void *arg);
 
 /* ------------------------------------------------------------------ setup */
 
@@ -146,9 +190,15 @@ wave5_queue_free(struct wave5_fh *fh, struct wave5_queue *q)
 {
 	int i;
 
-	for (i = 0; i < q->count; i++)
+	for (i = 0; i < q->count; i++) {
+		if (q->bufs[i].uncached != NULL) {
+			pmap_unmapdev(q->bufs[i].uncached,
+			    q->bufs[i].vb.size);
+			q->bufs[i].uncached = NULL;
+		}
 		if (q->bufs[i].vb.size != 0)
 			wave5_vdi_free_dma_memory(fh->vdev, &q->bufs[i].vb);
+	}
 	q->count = 0;
 	q->streaming = false;
 	TAILQ_INIT(&q->done_q);
@@ -161,6 +211,14 @@ wave5_fh_dtor(void *arg)
 
 	if (fh->sc->vdev_fh == fh)
 		fh->sc->vdev_fh = NULL;
+
+	/* The worker touches the instance, so it must be gone first. */
+	if (fh->worker != NULL) {
+		fh->worker_run = false;
+		while (fh->worker != NULL)
+			tsleep(&fh->worker_run, 0, "wave5xit", hz / 10);
+	}
+
 	wave5_fh_stop(fh);
 	wave5_queue_free(fh, &fh->out);
 	wave5_queue_free(fh, &fh->cap);
@@ -237,7 +295,8 @@ wave5_set_fmt(struct wave5_fh *fh, struct v4l2_format *f, bool try_only)
 		pix->plane_fmt[0].bytesperline = 0;
 	} else if (f->type == V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE) {
 		q = &fh->cap;
-		if (pix->pixelformat != V4L2_PIX_FMT_NV12)
+		if (pix->pixelformat != V4L2_PIX_FMT_NV12 &&
+		    pix->pixelformat != V4L2_PIX_FMT_YUV420)
 			pix->pixelformat = V4L2_PIX_FMT_NV12;
 		/*
 		 * Once the sequence header has been parsed the hardware's
@@ -254,8 +313,26 @@ wave5_set_fmt(struct wave5_fh *fh, struct v4l2_format *f, bool try_only)
 	} else
 		return (EINVAL);
 
-	if (pix->width == 0 || pix->height == 0)
-		return (EINVAL);
+	/*
+	 * TRY_FMT and S_FMT must adjust rather than fail -- that is the V4L2
+	 * contract, and ffmpeg depends on it: during device probe
+	 * v4l2_try_raw_format() sets only the pixel format and the queue type
+	 * and leaves width and height at zero, purely to ask "do you support
+	 * this layout at all?". Returning EINVAL there made ffmpeg reject the
+	 * device with "v4l2 capture format not supported" before it ever got
+	 * as far as decoding.
+	 */
+	if (pix->width == 0)
+		pix->width = q->width != 0 ? q->width : 1920;
+	if (pix->height == 0)
+		pix->height = q->height != 0 ? q->height : 1080;
+	pix->width = clamp(pix->width, 16U, 4096U);
+	pix->height = clamp(pix->height, 16U, 4096U);
+
+	if (f->type == V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE) {
+		pix->plane_fmt[0].bytesperline = pix->width;
+		pix->plane_fmt[0].sizeimage = pix->width * pix->height * 3 / 2;
+	}
 
 	if (!try_only) {
 		q->pixelformat = pix->pixelformat;
@@ -341,6 +418,9 @@ wave5_reqbufs(struct wave5_fh *fh, struct v4l2_requestbuffers *rb)
 			wave5_queue_free(fh, q);
 			return (ENOMEM);
 		}
+		/* Same physical pages, seen around the cache. */
+		b->uncached = pmap_mapdev((vm_paddr_t)b->vb.daddr +
+		    sifive_ccache_uncached_offset(), b->vb.size);
 	}
 	q->count = rb->count;
 	rb->capabilities = V4L2_BUF_CAP_SUPPORTS_MMAP;
@@ -485,7 +565,12 @@ wave5_dec_open(struct wave5_fh *fh)
 	inst->type = VPU_INST_TYPE_DEC;
 	inst->std = W_AVC_DEC;
 	inst->ops = &wave5_v4l2_inst_ops;
-	inst->cbcr_interleave = true;
+	/*
+	 * NV12 is chroma-interleaved; YUV420 ("YU12") is fully planar. The
+	 * capture format is already set by this point -- ffmpeg does S_FMT on
+	 * both queues before starting the output queue.
+	 */
+	inst->cbcr_interleave = (fh->cap.pixelformat != V4L2_PIX_FMT_YUV420);
 	inst->nv21 = false;
 	inst->output_format = FORMAT_420;
 	init_completion(&inst->irq_done);
@@ -611,6 +696,8 @@ wave5_dec_register_fbs(struct wave5_fh *fh)
 	uint32_t stride, height32, luma, chroma;
 	int i, ret;
 
+	inst->cbcr_interleave = (fh->cap.pixelformat != V4L2_PIX_FMT_YUV420);
+
 	stride = fh->cap.width;
 	height32 = ALIGN(fh->cap.height, 32);
 	luma = stride * height32;
@@ -658,6 +745,19 @@ wave5_dec_register_fbs(struct wave5_fh *fh)
 	if (ret != 0)
 		return (-ret);
 
+	/*
+	 * Tell the decoder which output buffers it may use.
+	 *
+	 * Registration happens lazily, on the first packet, but the
+	 * application queues its capture buffers earlier than that -- so
+	 * every clr_disp_flag() those QBUFs would have made was dropped,
+	 * because there was no instance to make it against. Without this the
+	 * decoder believes every framebuffer is still being displayed and
+	 * returns DISPLAY_IDX_FLAG_NO_FB forever, having produced nothing.
+	 */
+	for (i = 0; i < fh->linear; i++)
+		wave5_vpu_dec_clr_disp_flag(inst, i);
+
 	return (0);
 }
 
@@ -691,10 +791,30 @@ wave5_dec_one(struct wave5_fh *fh)
 	}
 
 	if (out.index_frame_display >= 0 &&
-	    out.index_frame_display < fh->linear)
+	    out.index_frame_display < fh->linear) {
+		fh->last_disp = out.index_frame_display;
 		return (out.index_frame_display);
+	}
 
-	if (wave5_debug || fh->dec_errors++ < 5)
+	fh->last_disp = out.index_frame_display;
+
+	/*
+	 * Latch the end of the stream where it is actually observed. Testing
+	 * last_disp back in the worker was unreliable: SEQ_END is reported
+	 * once, and the very next decode overwrites it with NO_FB, so the one
+	 * iteration that could have noticed is easy to miss.
+	 */
+	if (out.index_frame_display == DISPLAY_IDX_FLAG_SEQ_END && !fh->eos) {
+		fh->eos = true;
+		if (wave5_debug)
+			device_printf(fh->sc->bsddev,
+			    "video0: end of stream after %d frames\n",
+			    fh->frames_out);
+		selwakeup(&fh->rsel);
+		wakeup(&fh->cap);
+	}
+
+	if (wave5_debug)
 		device_printf(fh->sc->bsddev,
 		    "video0: no display frame (disp %d decoded %d, %ux%u)\n",
 		    out.index_frame_display, out.index_frame_decoded,
@@ -711,6 +831,124 @@ wave5_dec_one(struct wave5_fh *fh)
 		fh->eos = true;
 
 	return (-1);
+}
+
+/*
+ * Produce frames as fast as the application returns buffers, and wake anyone
+ * in poll() or DQBUF. wave5_dec_one() returning -1 is normal and usually
+ * means every framebuffer is still held by the application, so it is simply a
+ * reason to wait rather than an error.
+ */
+static void
+wave5_worker(void *arg)
+{
+	struct wave5_fh *fh = arg;
+	int idx;
+
+	while (fh->worker_run) {
+		if (!fh->cap.streaming || !fh->out.streaming || fh->eos) {
+			pause("wave5idle", hz / 50);
+			continue;
+		}
+
+		/*
+		 * Bring the decoder up on the first data, not at STREAMON:
+		 * the sequence header only exists once a packet has been fed.
+		 */
+		if (!fh->fbs_ready) {
+			int err;
+
+			if (fh->bs_used == 0) {
+				pause("wave5data", hz / 100);
+				continue;
+			}
+			err = wave5_dec_init_seq(fh);
+			if (err != 0) {
+				if (fh->dec_errors++ < 3) {
+					const uint8_t *bs =
+					    (const uint8_t *)fh->bitstream.vaddr;
+
+					device_printf(fh->sc->bsddev,
+					    "video0: sequence init: %d "
+					    "(%zu bytes fed, stream starts "
+					    "%02x %02x %02x %02x %02x %02x)\n",
+					    err, fh->bs_used, bs[0], bs[1],
+					    bs[2], bs[3], bs[4], bs[5]);
+				}
+				pause("wave5seq", hz / 20);
+				continue;
+			}
+			err = wave5_dec_register_fbs(fh);
+			if (err != 0) {
+				device_printf(fh->sc->bsddev,
+				    "video0: framebuffer registration: %d "
+				    "(%d reference + %d output, %ux%u)\n",
+				    err, fh->non_linear, fh->cap.count,
+				    fh->cap.width, fh->cap.height);
+				fh->eos = true;
+				continue;
+			}
+			fh->fbs_ready = true;
+		}
+
+		idx = wave5_dec_one(fh);
+		if (idx < 0) {
+			/*
+			 * Ending the stream is the decoder's call, not a
+			 * guess from here. Two earlier attempts got it
+			 * wrong: a run of empty decodes is usually just
+			 * NO_FB, meaning the application still holds every
+			 * framebuffer (that truncated playback at 3 frames
+			 * of 30); and the read pointer catching the write
+			 * pointer only means the *parser* is done, while the
+			 * decoder may still be holding a dozen frames for
+			 * display reordering.
+			 *
+			 * The protocol is to tell the firmware no more data
+			 * is coming -- an update of zero bytes -- and then
+			 * let it drain and report DISPLAY_IDX_FLAG_SEQ_END.
+			 */
+			if (fh->draining && !fh->eos_signalled) {
+				fh->eos_signalled = true;
+				wave5_vpu_dec_update_bitstream_buffer(fh->inst,
+				    0);
+			}
+
+			if (!fh->eos && (fh->last_disp ==
+			    DISPLAY_IDX_FLAG_SEQ_END ||
+			    (fh->draining && ++fh->idle_polls > 2000))) {
+				fh->eos = true;
+				device_printf(fh->sc->bsddev,
+				    "video0: EOS (last disp %d, %d frames)\n",
+				    fh->last_disp, fh->frames_out);
+				/*
+				 * End of stream is an event a waiter must be
+				 * told about: ffmpeg blocks in poll() with no
+				 * timeout and would otherwise sleep forever
+				 * with every frame already decoded.
+				 */
+				selwakeup(&fh->rsel);
+				wakeup(&fh->cap);
+			}
+			pause("wave5nofb", hz / 200);
+			continue;
+		}
+		fh->idle_polls = 0;
+
+		mtx_lock(&fh->lock);
+		fh->cap.bufs[idx].done = true;
+		fh->cap.bufs[idx].queued = false;
+		fh->cap.bufs[idx].bytesused = fh->cap.sizeimage;
+		TAILQ_INSERT_TAIL(&fh->cap.done_q, &fh->cap.bufs[idx], link);
+		fh->frames_out++;
+		mtx_unlock(&fh->lock);
+		selwakeup(&fh->rsel);
+		wakeup(&fh->cap);
+	}
+
+	fh->worker = NULL;
+	wakeup(&fh->worker_run);
+	kthread_exit();
 }
 
 /* ------------------------------------------------------ queue operations */
@@ -738,16 +976,49 @@ wave5_qbuf(struct wave5_fh *fh, struct v4l2_buffer *v)
 		b->bytesused = plane.bytesused;
 
 		/*
+		 * Open on first data, not at STREAMON. ffmpeg queues packets
+		 * before it starts the output queue -- v4l2_receive_frame()
+		 * sends the packet and only then calls v4l2_try_start() -- so
+		 * waiting for STREAMON silently discarded the first access
+		 * unit, which is exactly the one carrying SPS and PPS. The
+		 * decoder then saw a stream beginning at a non-IDR slice and
+		 * could never parse a sequence header.
+		 */
+		if (!fh->opened) {
+			err = wave5_dec_open(fh);
+			if (err != 0)
+				return (err);
+		}
+
+		/*
+		 * A zero-length buffer is how ffmpeg says "no more input":
+		 * at EOF v4l2_receive_frame() enqueues its empty packet
+		 * rather than issuing an explicit command.
+		 */
+		if (b->bytesused > 0) {
+			fh->ts_fifo[fh->ts_head % nitems(fh->ts_fifo)] =
+			    v->timestamp;
+			fh->ts_head++;
+		}
+
+		if (b->bytesused == 0) {
+			fh->draining = true;
+		}
+
+		/*
 		 * Coded data arrives in a buffer the application mmap'd; the
 		 * decoder reads from its own ring. Copy it across and tell the
 		 * firmware how much is there. The copy is of compressed data,
 		 * so it is small relative to a frame.
 		 */
-		if (b->bytesused > 0 && fh->opened) {
+		if (b->bytesused > 0) {
 			if (fh->bs_used + b->bytesused > fh->bitstream.size)
 				fh->bs_used = 0;
+			const uint8_t *src = (const uint8_t *)(b->uncached !=
+			    NULL ? b->uncached : b->vb.vaddr);
+
 			err = wave5_vdi_write_memory(fh->vdev, &fh->bitstream,
-			    fh->bs_used, (u8 *)b->vb.vaddr, b->bytesused);
+			    fh->bs_used, __DECONST(u8 *, src), b->bytesused);
 			if (err < 0)
 				return (EIO);
 			fh->bs_used += b->bytesused;
@@ -771,7 +1042,7 @@ wave5_qbuf(struct wave5_fh *fh, struct v4l2_buffer *v)
 	b = &fh->cap.bufs[v->index];
 	b->queued = true;
 	b->done = false;
-	if (fh->seq_done && fh->inst != NULL)
+	if (fh->fbs_ready && fh->inst != NULL)
 		wave5_vpu_dec_clr_disp_flag(fh->inst, v->index);
 
 	/*
@@ -789,7 +1060,7 @@ wave5_dqbuf(struct wave5_fh *fh, struct v4l2_buffer *v, int flags)
 	struct v4l2_plane plane;
 	struct wave5_queue *q;
 	struct wave5_buf *b;
-	int err, idx;
+	int err;
 
 	if (v->type == V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE)
 		q = &fh->out;
@@ -810,19 +1081,33 @@ wave5_dqbuf(struct wave5_fh *fh, struct v4l2_buffer *v, int flags)
 		}
 		mtx_unlock(&fh->lock);
 
-		if (q == &fh->cap && fh->cap.streaming && fh->out.streaming) {
-			/* Nothing ready: try to produce one. */
-			idx = wave5_dec_one(fh);
-			if (idx >= 0) {
-				b = &fh->cap.bufs[idx];
-				b->queued = false;
-				b->bytesused = fh->cap.sizeimage;
-				break;
+		if (fh->eos) {
+			/*
+			 * ffmpeg recognises the end of a stream by dequeuing
+			 * a buffer flagged V4L2_BUF_FLAG_LAST, not by an
+			 * error -- v4l2_dequeue_v4l2buf() sets ctx->done on
+			 * that flag. Returning EPIPE instead leaves it
+			 * waiting forever with every frame already decoded.
+			 */
+			if (q == &fh->cap && !fh->sent_last) {
+				fh->sent_last = true;
+				memset(&plane, 0, sizeof(plane));
+				v->index = 0;
+				v->memory = V4L2_MEMORY_MMAP;
+				v->length = 1;
+				v->bytesused = 0;
+				v->field = V4L2_FIELD_NONE;
+				v->flags = V4L2_BUF_FLAG_LAST;
+				if (v->m.planes != NULL) {
+					err = copyout(&plane, v->m.planes,
+					    sizeof(plane));
+					if (err != 0)
+						return (err);
+				}
+				return (0);
 			}
-		}
-
-		if (fh->eos)
 			return (EPIPE);
+		}
 		if ((flags & O_NONBLOCK) != 0)
 			return (EAGAIN);
 		/*
@@ -839,6 +1124,14 @@ wave5_dqbuf(struct wave5_fh *fh, struct v4l2_buffer *v, int flags)
 
 	wave5_fill_vbuf(q, b, v, &plane);
 	v->bytesused = b->bytesused;
+	if (q == &fh->cap) {
+		if (fh->ts_tail < fh->ts_head) {
+			v->timestamp =
+			    fh->ts_fifo[fh->ts_tail % nitems(fh->ts_fifo)];
+			fh->ts_tail++;
+		} else
+			microtime(&v->timestamp);
+	}
 	if (v->m.planes != NULL) {
 		err = copyout(&plane, v->m.planes, sizeof(plane));
 		if (err != 0)
@@ -866,23 +1159,24 @@ wave5_streamon(struct wave5_fh *fh, uint32_t type)
 	if (!fh->opened)
 		return (EINVAL);
 
-	err = wave5_dec_init_seq(fh);
-	if (err != 0) {
-		device_printf(fh->sc->bsddev,
-		    "video0: sequence init failed: %d\n", err);
-		return (err);
-	}
-	err = wave5_dec_register_fbs(fh);
-	if (err != 0) {
-		device_printf(fh->sc->bsddev,
-		    "video0: framebuffer registration failed: %d "
-		    "(%d reference + %d output, %ux%u)\n", err,
-		    fh->non_linear, fh->cap.count, fh->cap.width,
-		    fh->cap.height);
-		return (err);
+	/*
+	 * Deliberately no sequence init here. ffmpeg starts the capture queue
+	 * from v4l2_try_start() before queueing any packet, so there is
+	 * nothing to parse yet and demanding it fails the stream outright
+	 * ("sequence init failed: 5"). The worker does it once data arrives.
+	 */
+	fh->cap.streaming = true;
+
+	if (fh->worker == NULL) {
+		fh->worker_run = true;
+		if (kthread_add(wave5_worker, fh, NULL, &fh->worker, 0, 0,
+		    "wave5dec") != 0) {
+			fh->worker_run = false;
+			fh->cap.streaming = false;
+			return (ENOMEM);
+		}
 	}
 
-	fh->cap.streaming = true;
 	return (0);
 }
 
@@ -897,7 +1191,7 @@ wave5_v4l2_poll(struct cdev *dev, int events, struct thread *td)
 
 	mtx_lock(&fh->lock);
 	if ((events & (POLLIN | POLLRDNORM)) != 0 &&
-	    (!TAILQ_EMPTY(&fh->cap.done_q) || fh->eos))
+	    (!TAILQ_EMPTY(&fh->cap.done_q) || (fh->eos && !fh->sent_last)))
 		revents |= events & (POLLIN | POLLRDNORM);
 	if ((events & (POLLOUT | POLLWRNORM)) != 0)
 		revents |= events & (POLLOUT | POLLWRNORM);
@@ -939,7 +1233,7 @@ wave5_v4l2_ioctl(struct cdev *dev, u_long cmd, caddr_t data, int fflag,
 	case VIDIOC_ENUM_FMT: {
 		struct v4l2_fmtdesc *f = (struct v4l2_fmtdesc *)data;
 
-		if (f->index != 0)
+		if (f->type == V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE && f->index != 0)
 			return (EINVAL);
 		if (f->type == V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE) {
 			f->pixelformat = V4L2_PIX_FMT_H264;
@@ -949,11 +1243,26 @@ wave5_v4l2_ioctl(struct cdev *dev, u_long cmd, caddr_t data, int fflag,
 			return (0);
 		}
 		if (f->type == V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE) {
-			f->pixelformat = V4L2_PIX_FMT_NV12;
-			f->flags = 0;
-			strlcpy((char *)f->description, "Y/UV 4:2:0",
-			    sizeof(f->description));
-			return (0);
+			/*
+			 * Both layouts, because ffmpeg rejects the device
+			 * outright if it cannot find one matching the pixel
+			 * format it has already chosen -- usually yuv420p,
+			 * which is planar. The hardware writes either; only
+			 * cbcr_interleave differs.
+			 */
+			switch (f->index) {
+			case 0:
+				f->pixelformat = V4L2_PIX_FMT_YUV420;
+				strlcpy((char *)f->description,
+				    "Planar YUV 4:2:0", sizeof(f->description));
+				return (0);
+			case 1:
+				f->pixelformat = V4L2_PIX_FMT_NV12;
+				strlcpy((char *)f->description, "Y/UV 4:2:0",
+				    sizeof(f->description));
+				return (0);
+			}
+			return (EINVAL);
 		}
 		return (EINVAL);
 	}
@@ -995,8 +1304,10 @@ wave5_v4l2_ioctl(struct cdev *dev, u_long cmd, caddr_t data, int fflag,
 	case VIDIOC_STREAMOFF: {
 		uint32_t type = *(uint32_t *)data;
 
-		if (type == V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE)
+		if (type == V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE) {
 			fh->out.streaming = false;
+			fh->draining = true;
+		}
 		else if (type == V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE)
 			fh->cap.streaming = false;
 		else
