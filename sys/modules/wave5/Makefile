@@ -17,6 +17,7 @@ KMOD=	wave5
 
 SRCS=	wave5_freebsd.c \
 	wave5_decode.c \
+	wave5_v4l2.c \
 	wave5-vdi.c \
 	wave5-vpuapi.c \
 	wave5-hw.c
@@ -31,6 +32,11 @@ CFLAGS+= -I${SRCTOP}/sys/riscv/starfive/wave5
 # and friends are merely implicitly declared and the driver would link against
 # nothing. riscv is always FDT, so defining it unconditionally is correct.
 CFLAGS+= -DFDT
+
+# The V4L2 uapi headers imported under uapi/ are the ones multimedia/v4l_compat
+# installs for userspace, so the ioctl numbers and struct layouts the driver
+# compiles against are literally the ones ffmpeg compiles against.
+CFLAGS+= -I${SRCTOP}/sys/riscv/starfive/wave5/uapi
 
 VENDOR_CWARNFLAGS= -Wno-unused-parameter -Wno-sign-compare \
 	-Wno-missing-prototypes -Wno-cast-qual -Wno-unused-but-set-variable \

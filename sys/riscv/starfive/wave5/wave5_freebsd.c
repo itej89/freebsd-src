@@ -35,6 +35,7 @@
 #include <sys/linker.h>
 #include <sys/firmware.h>
 #include <sys/sysctl.h>
+#include <sys/conf.h>
 
 #include <machine/bus.h>
 
@@ -50,6 +51,7 @@
 #include <dev/hwreset/hwreset.h>
 #include <dev/pwrdom/pwrdom.h>
 
+#include "wave5_softc.h"
 #include "wave5_osal.h"
 #include "wave5-vpu.h"
 #include "wave5-vpuapi.h"
@@ -79,37 +81,6 @@ SYSCTL_INT(_hw_wave5, OID_AUTO, trace_regs, CTLFLAG_RWTUN, &wave5_trace_regs,
  */
 #define	WAVE5_DEC_FW_NAME	"wave511_dec_fw.bin"
 
-#define	WAVE5_MAX_CLKS		8
-#define	WAVE5_MAX_RESETS	8
-
-struct wave5_softc {
-	/*
-	 * vpu_device must be reachable from struct device's drvdata, because
-	 * the ported files do dev_get_drvdata() to find it. Keeping both here
-	 * and pointing them at each other in attach avoids a second
-	 * allocation.
-	 */
-	struct vpu_device	vdev;
-	struct device		dev;
-
-	device_t		bsddev;
-	struct resource		*mem_res;
-	struct resource		*irq_res;
-	void			*irq_cookie;
-	int			mem_rid;
-	int			irq_rid;
-
-	clk_t			clks[WAVE5_MAX_CLKS];
-	int			nclks;
-	hwreset_t		resets[WAVE5_MAX_RESETS];
-	int			nresets;
-	pwrdom_t		pwrdom;
-
-	const struct firmware	*fw;
-	uint32_t		fw_revision;
-	uint32_t		product_id;
-	bool			fw_loaded;
-};
 
 static struct ofw_compat_data compat_data[] = {
 	{ "starfive,vdec",	1 },
@@ -513,6 +484,13 @@ wave5_attach(device_t dev)
 
 	wave5_singleton = sc;
 
+	/*
+	 * Only now: the node must not appear before the firmware is running,
+	 * or an application could open it and issue commands to a dead core.
+	 */
+	if (wave5_v4l2_attach(sc) != 0)
+		device_printf(dev, "could not create /dev/video0\n");
+
 	return (0);
 
 fail:
@@ -537,6 +515,8 @@ wave5_detach(device_t dev)
 
 	if (wave5_singleton == sc)
 		wave5_singleton = NULL;
+
+	wave5_v4l2_detach(sc);
 
 	if (sc->irq_cookie != NULL) {
 		bus_teardown_intr(dev, sc->irq_res, sc->irq_cookie);
