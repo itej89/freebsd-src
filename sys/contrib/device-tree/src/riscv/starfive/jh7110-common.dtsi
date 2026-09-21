@@ -36,9 +36,42 @@
 		priority = <224>;
 	};
 
+	/*
+	 * There is no codec chip -- the PWM pins drive the jack through an RC
+	 * filter -- but audio_soc(4) needs a codec device and only offers a
+	 * mixer hook on the codec. dummy_codec(4) has none, which left the
+	 * analogue output with no volume control anything could reach.
+	 */
 	pwmdac_codec: audio-codec {
-		compatible = "linux,spdif-dit";
+		compatible = "starfive,jh7110-pwmdac-codec";
 		#sound-dai-cells = <0>;
+	};
+
+	/*
+	 * HDMI audio codec. The transmitter at 29590000 owns these registers,
+	 * but its driver is built into every kernel and cannot depend on
+	 * sound(4), so the codec half is a separate driver with its own node.
+	 */
+	/* i2stx0 needs the external MCLK pin muxed; see mclk_ext_pins. */
+	hdmi_codec: hdmi-audio {
+		compatible = "starfive,jh7110-hdmi-audio";
+		#sound-dai-cells = <0>;
+		status = "okay";
+	};
+
+	sound1 {
+		compatible = "simple-audio-card";
+		simple-audio-card,name = "StarFive-HDMI-Sound-Card";
+		simple-audio-card,format = "i2s";
+		simple-audio-card,mclk-fs = <256>;
+
+		simple-audio-card,cpu {
+			sound-dai = <&i2stx0>;
+		};
+
+		simple-audio-card,codec {
+			sound-dai = <&hdmi_codec>;
+		};
 	};
 
 	sound {
@@ -667,6 +700,21 @@
 		};
 	};
 
+	/*
+	 * The 12.288 MHz oscillator that clocks I2S TX0, and through it the
+	 * HDMI transmitter's audio. mclk_ext is only a fixed-clock node --
+	 * describing it does not make it oscillate, and without this mux the
+	 * whole bclk/lrck chain is dead while still reporting correct rates.
+	 */
+	mclk_ext_pins: mclk-ext-0 {
+		mclk-ext-pins {
+			pinmux = <GPIOMUX(4, GPOUT_LOW,
+					     GPOEN_DISABLE,
+					     GPI_SYS_MCLK_EXT)>;
+			input-enable;
+		};
+	};
+
 	pwmdac_pins: pwmdac-0 {
 		pwmdac-pins {
 			pinmux = <GPIOMUX(33, GPOUT_SYS_PWMDAC_LEFT,
@@ -848,4 +896,9 @@
 	hpd-gpios = <&sysgpio 15 GPIO_ACTIVE_HIGH>;
 
 	status = "okay";
+};
+
+&i2stx0 {
+	pinctrl-names = "default";
+	pinctrl-0 = <&mclk_ext_pins>;
 };

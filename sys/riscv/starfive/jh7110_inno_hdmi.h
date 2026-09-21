@@ -32,6 +32,16 @@ struct jh7110_hdmi_mode {
 };
 
 void jh7110_hdmi_enable(const struct jh7110_hdmi_mode *mode);
+
+/*
+ * For jh7110_hdmi_audio.c. The audio block shares this register window, but
+ * lives in a separate, sound(4)-dependent file because this driver is built
+ * into every kernel.
+ */
+uint32_t jh7110_hdmi_tmds_rate(void);
+void jh7110_hdmi_audio_write(uint32_t reg, uint32_t val);
+uint32_t jh7110_hdmi_audio_read(uint32_t reg);
+void jh7110_hdmi_audio_modb(uint32_t reg, uint32_t mask, uint32_t val);
 void jh7110_hdmi_disable(void);
 bool jh7110_hdmi_is_available(void);
 

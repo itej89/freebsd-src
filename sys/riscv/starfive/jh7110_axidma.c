@@ -69,6 +69,7 @@
 #define	DMAC_CHEN		0x018
 #define	DMAC_INTSTATUS		0x030
 #define	DMAC_COMMON_INTCLEAR	0x038
+#define	DMAC_CHABORTREG		0x028
 #define	DMAC_RESET		0x058
 
 #define	DMAC_EN_MASK		(1u << 0)
@@ -935,8 +936,28 @@ jh7110_axidma_stop(struct jh7110_dma_chan *ch)
 			break;
 		DELAY(10);
 	}
-	if (timeout == 0)
-		device_printf(sc->dev, "ch%d: failed to stop\n", ch->id);
+	if (timeout == 0) {
+		/*
+		 * The engine will not clear CHEN while a transfer is
+		 * outstanding, so a channel waiting on a handshake that never
+		 * arrives is stuck for good. Abort it: without this the first
+		 * failure poisons every later start, which then writes the
+		 * channel's registers while it is still live and reports
+		 * WRONCHEN.
+		 */
+		device_printf(sc->dev, "ch%d: will not stop; aborting\n",
+		    ch->id);
+		WR4(sc, DMAC_CHABORTREG, 1u << ch->id);
+
+		for (timeout = 1000; timeout > 0; timeout--) {
+			if (!axidma_chan_is_enabled(ch))
+				break;
+			DELAY(10);
+		}
+		if (timeout == 0)
+			device_printf(sc->dev, "ch%d: abort failed too\n",
+			    ch->id);
+	}
 
 	CH_WR4(ch, CH_INTSTATUS_ENA, 0);
 	CH_WR4(ch, CH_INTCLEAR, DWAXIDMAC_IRQ_ALL);

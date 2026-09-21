@@ -36,6 +36,7 @@
 #include <riscv/sifive/sifive_ccache.h>
 
 #include "jh7110_axidma.h"
+#include "jh7110_pwmdac.h"
 
 #include "opt_snd.h"
 #include <dev/sound/pcm/sound.h>
@@ -586,6 +587,32 @@ static int pwmdac_bits_unsafe = 0;
  */
 static int pwmdac_osr = 8;
 
+/*
+ * Playback volume in percent, driven by the codec's OSS mixer. Applied before
+ * the noise shaper so that shaping still works against the value actually
+ * converted; attenuating after it would move the shaped noise down with the
+ * signal and undo the benefit.
+ */
+static int pwmdac_volume = 100;
+
+void
+jh7110_pwmdac_set_volume(int pct)
+{
+
+	if (pct < 0)
+		pct = 0;
+	else if (pct > 100)
+		pct = 100;
+	pwmdac_volume = pct;
+}
+
+int
+jh7110_pwmdac_get_volume(void)
+{
+
+	return (pwmdac_volume);
+}
+
 static int pwmdac_synth;
 static uint32_t pwmdac_phase;
 static uint8_t pwmdac_filltrace[64];
@@ -938,6 +965,11 @@ jh7110_pwmdac_attach(device_t dev)
 	    SYSCTL_CHILDREN(device_get_sysctl_tree(dev)), OID_AUTO,
 	    "underruns", CTLFLAG_RD, &pwmdac_underruns, 0,
 	    "periods that could not be filled completely");
+
+	SYSCTL_ADD_INT(device_get_sysctl_ctx(dev),
+	    SYSCTL_CHILDREN(device_get_sysctl_tree(dev)), OID_AUTO,
+	    "volume", CTLFLAG_RW, &pwmdac_volume, 0,
+	    "playback volume in percent; the mixer drives this");
 
 	SYSCTL_ADD_INT(device_get_sysctl_ctx(dev),
 	    SYSCTL_CHILDREN(device_get_sysctl_tree(dev)), OID_AUTO,
@@ -1312,6 +1344,12 @@ pwmdac_fill_slot(struct jh7110_pwmdac_softc *sc, struct snd_dbuf *play_buf,
 	uint32_t avail, size, i, out = 0;
 	u_int osr = sc->osr;
 	int all_zero;
+	int vol = pwmdac_volume;
+
+	if (vol < 0)
+		vol = 0;
+	else if (vol > 100)
+		vol = 100;
 
 	slot = (volatile uint32_t *)(sc->ring +
 	    (size_t)idx * sc->period_bytes);
@@ -1396,6 +1434,11 @@ pwmdac_fill_slot(struct jh7110_pwmdac_softc *sc, struct snd_dbuf *play_buf,
 			    (samples[(off + 1) % size] << 8));
 			r = (int16_t)(samples[(off + 2) % size] |
 			    (samples[(off + 3) % size] << 8));
+		}
+
+		if (vol < 100) {
+			l = (l * vol) / 100;
+			r = (r * vol) / 100;
 		}
 
 		if (pwmdac_atten != 0 || pwmdac_dither) {

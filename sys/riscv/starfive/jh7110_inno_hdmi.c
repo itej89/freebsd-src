@@ -82,6 +82,14 @@ static struct resource *dss_res;
 static device_t hdmi_dev;
 static clk_t hdmi_clks[8];
 static int hdmi_nclks;
+
+/*
+ * TMDS clock of the mode currently programmed, in Hz. HDMI audio derives its
+ * clock-regeneration CTS value from this, and nothing else in the system
+ * knows it. Zero means no mode has been set. At 8bpc the TMDS clock equals
+ * the pixel clock, which is what the PLL configuration below assumes.
+ */
+static uint32_t hdmi_tmds_rate;
 static clk_t dc_pix_clk;
 static clk_t dc_hdmitx_pixclk;
 static clk_t dc_lcd_clk;
@@ -544,6 +552,10 @@ jh7110_hdmi_config_pll(uint32_t pixclock)
 void
 jh7110_hdmi_enable(const struct jh7110_hdmi_mode *mode)
 {
+	/* Remembered for HDMI audio's CTS; see jh7110_hdmi_tmds_rate(). */
+	if (mode != NULL)
+		hdmi_tmds_rate = mode->pixclock;
+
 	int timeout;
 	uint32_t val;
 	uint8_t timing_ctl;
@@ -657,6 +669,47 @@ jh7110_hdmi_enable(const struct jh7110_hdmi_mode *mode)
 
 	device_printf(hdmi_dev, "%ux%u @ %u Hz pixel clock\n",
 	    mode->hdisplay, mode->vdisplay, mode->pixclock);
+}
+
+/*
+ * Accessors for the audio block, which lives in this register window but is
+ * driven from jh7110_hdmi_audio.c. Registers are byte-numbered and the window
+ * is 32 bits wide, hence the shift in HDMI_WR/HDMI_RD.
+ */
+uint32_t
+jh7110_hdmi_tmds_rate(void)
+{
+
+	return (hdmi_tmds_rate);
+}
+
+void
+jh7110_hdmi_audio_write(uint32_t reg, uint32_t val)
+{
+
+	if (hdmi_res != NULL)
+		HDMI_WR(reg, val);
+}
+
+uint32_t
+jh7110_hdmi_audio_read(uint32_t reg)
+{
+
+	if (hdmi_res == NULL)
+		return (0);
+	return (HDMI_RD(reg));
+}
+
+void
+jh7110_hdmi_audio_modb(uint32_t reg, uint32_t mask, uint32_t val)
+{
+	uint32_t v;
+
+	if (hdmi_res == NULL)
+		return;
+	v = HDMI_RD(reg);
+	v = (v & ~mask) | (val & mask);
+	HDMI_WR(reg, v);
 }
 
 void

@@ -803,15 +803,18 @@
 				 <&syscrg JH7110_SYSCLK_I2STX0_APB>,
 				 <&syscrg JH7110_SYSCLK_MCLK>,
 				 <&syscrg JH7110_SYSCLK_MCLK_INNER>,
-				 <&mclk_ext>;
+				 <&mclk_ext>,
+				 <&syscrg JH7110_SYSCLK_I2STX0_BCLK>,
+				 <&syscrg JH7110_SYSCLK_I2STX0_LRCK>;
 			clock-names = "i2sclk", "apb", "mclk",
-				      "mclk_inner","mclk_ext";
+				      "mclk_inner","mclk_ext",
+				      "bclk", "lrck";
 			resets = <&syscrg JH7110_SYSRST_I2STX0_APB>,
 				 <&syscrg JH7110_SYSRST_I2STX0_BCLK>;
 			dmas = <&dma 47>;
 			dma-names = "tx";
 			#sound-dai-cells = <0>;
-			status = "disabled";
+			status = "okay";
 		};
 
 		i2stx1: i2s@120c0000 {
