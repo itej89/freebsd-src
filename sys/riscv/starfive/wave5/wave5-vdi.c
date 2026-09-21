@@ -104,14 +104,58 @@ int wave5_vdi_release(struct device *dev)
 	return 0;
 }
 
+/*
+ * Register tracing, for diffing against the Linux reference traces in
+ * vf2-ddk-mesa-test/reference/wave5/. Set hw.wave5.trace_regs=N (a tunable, so
+ * it can be armed before the driver attaches) to log the first N accesses in
+ * exactly the format the instrumented Linux driver emits.
+ *
+ * Reads are deduplicated for the same reason they are there: a busy-wait poll
+ * issues millions of identical reads, and on this board's 115200-baud serial
+ * console each printed line costs about 11 ms, so logging them all would both
+ * bury the sequence and change the timing being observed.
+ */
+int wave5_trace_regs;
+
+static u32 wave5_trace_last_addr = 0xffffffff, wave5_trace_last_val;
+static unsigned int wave5_trace_rep;
+
+static void wave5_trace_flush_rep(void)
+{
+	if (wave5_trace_rep > 1)
+		printf("W5 R %04x -> %08x (x%u)\n", wave5_trace_last_addr,
+		    wave5_trace_last_val, wave5_trace_rep);
+	wave5_trace_rep = 0;
+	wave5_trace_last_addr = 0xffffffff;
+}
+
 void wave5_vdi_write_register(struct vpu_device *vpu_dev, u32 addr, u32 data)
 {
+	if (wave5_trace_regs > 0) {
+		wave5_trace_flush_rep();
+		wave5_trace_regs--;
+		printf("W5 W %04x <- %08x\n", addr, data);
+	}
 	writel(data, vpu_dev->vdb_register + addr);
 }
 
 unsigned int wave5_vdi_read_register(struct vpu_device *vpu_dev, u32 addr)
 {
-	return readl(vpu_dev->vdb_register + addr);
+	u32 v = readl(vpu_dev->vdb_register + addr);
+
+	if (wave5_trace_regs > 0) {
+		if (addr == wave5_trace_last_addr && v == wave5_trace_last_val) {
+			wave5_trace_rep++;
+		} else {
+			wave5_trace_flush_rep();
+			wave5_trace_regs--;
+			printf("W5 R %04x -> %08x\n", addr, v);
+			wave5_trace_last_addr = addr;
+			wave5_trace_last_val = v;
+			wave5_trace_rep = 1;
+		}
+	}
+	return v;
 }
 
 int wave5_vdi_clear_memory(struct vpu_device *vpu_dev, struct vpu_buf *vb)

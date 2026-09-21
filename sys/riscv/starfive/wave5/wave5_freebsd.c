@@ -65,6 +65,14 @@ SYSCTL_INT(_hw_wave5, OID_AUTO, debug, CTLFLAG_RWTUN, &wave5_debug, 0,
     "enable verbose decoder logging");
 
 /*
+ * Defined in wave5-vdi.c. A tunable because the sequence worth capturing
+ * happens during attach, before any sysctl could be written.
+ */
+extern int wave5_trace_regs;
+SYSCTL_INT(_hw_wave5, OID_AUTO, trace_regs, CTLFLAG_RWTUN, &wave5_trace_regs,
+    0, "log the first N register accesses, for diffing against Linux");
+
+/*
  * The decoder firmware. firmware(9) resolves this name to
  * /boot/firmware/wave511_dec_fw.bin (same mechanism the GPU DDK uses). The
  * blob ships with StarFive's Debian image; it is 952768 bytes there.
@@ -107,6 +115,37 @@ static struct ofw_compat_data compat_data[] = {
 	{ "starfive,vdec",	1 },
 	{ NULL,			0 }
 };
+
+/*
+ * The single attached decoder, for the sysctl-driven self-test. There is one
+ * VPU on this SoC, so a pointer is enough; it is set at the end of a
+ * successful attach and cleared on detach.
+ */
+static struct wave5_softc *wave5_singleton;
+
+int wave5_run_selftest(struct vpu_device *vdev);
+
+static int
+wave5_selftest_sysctl(SYSCTL_HANDLER_ARGS)
+{
+	struct wave5_softc *sc = wave5_singleton;
+	int err, run = 0;
+
+	err = sysctl_handle_int(oidp, &run, 0, req);
+	if (err != 0 || req->newptr == NULL)
+		return (err);
+	if (run == 0)
+		return (0);
+	if (sc == NULL || !sc->fw_loaded)
+		return (ENXIO);
+
+	return (wave5_run_selftest(&sc->vdev));
+}
+
+SYSCTL_PROC(_hw_wave5, OID_AUTO, selftest,
+    CTLTYPE_INT | CTLFLAG_WR | CTLFLAG_MPSAFE, NULL, 0,
+    wave5_selftest_sysctl, "I",
+    "write 1 to decode /boot/firmware/wave5_test.h264 and hash each frame");
 
 /* ------------------------------------------------------------ interrupt */
 
@@ -472,6 +511,8 @@ wave5_attach(device_t dev)
 	    "Wave511 product %#x id %u firmware revision %u\n",
 	    sc->vdev.product_code, sc->product_id, sc->fw_revision);
 
+	wave5_singleton = sc;
+
 	return (0);
 
 fail:
@@ -493,6 +534,9 @@ wave5_detach(device_t dev)
 	int i;
 
 	sc = device_get_softc(dev);
+
+	if (wave5_singleton == sc)
+		wave5_singleton = NULL;
 
 	if (sc->irq_cookie != NULL) {
 		bus_teardown_intr(dev, sc->irq_res, sc->irq_cookie);

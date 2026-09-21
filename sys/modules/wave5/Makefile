@@ -16,6 +16,7 @@
 KMOD=	wave5
 
 SRCS=	wave5_freebsd.c \
+	wave5_decode.c \
 	wave5-vdi.c \
 	wave5-vpuapi.c \
 	wave5-hw.c
