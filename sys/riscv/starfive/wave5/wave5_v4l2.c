@@ -163,6 +163,22 @@ struct wave5_fh {
 	struct timeval		ts_fifo[64];
 	unsigned int		ts_head;
 	unsigned int		ts_tail;
+
+	/*
+	 * A timestamp per framebuffer, not per dequeue.
+	 *
+	 * Popping a queue in display order is only right when display order
+	 * equals decode order. HEVC reorders by default, and so does H.264
+	 * with B-frames, at which point every frame gets somebody else's
+	 * timestamp: ffmpeg reported "dup=15 drop=14" and 31 frames for a
+	 * 30-frame HEVC clip whose pixels were byte-perfect.
+	 *
+	 * The decoder reports both orders -- index_frame_decoded is the
+	 * buffer it just wrote, index_frame_display the one now ready to
+	 * show -- so stamp the buffer when it is decoded and read the stamp
+	 * back when it is displayed.
+	 */
+	struct timeval		ts_by_fb[MAX_REG_FRAME];
 	int			idle_polls;
 };
 
@@ -288,7 +304,8 @@ wave5_set_fmt(struct wave5_fh *fh, struct v4l2_format *f, bool try_only)
 
 	if (f->type == V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE) {
 		q = &fh->out;
-		if (pix->pixelformat != V4L2_PIX_FMT_H264)
+		if (pix->pixelformat != V4L2_PIX_FMT_H264 &&
+		    pix->pixelformat != V4L2_PIX_FMT_HEVC)
 			pix->pixelformat = V4L2_PIX_FMT_H264;
 		pix->num_planes = 1;
 		pix->plane_fmt[0].sizeimage = WAVE5_OUTBUF_SIZE;
@@ -563,7 +580,13 @@ wave5_dec_open(struct wave5_fh *fh)
 
 	inst->dev = vdev;
 	inst->type = VPU_INST_TYPE_DEC;
-	inst->std = W_AVC_DEC;
+	/*
+	 * The coded format is fixed by S_FMT on the output queue, which ffmpeg
+	 * always performs before any packet is queued -- and the instance is
+	 * opened on the first packet, so this is settled by now.
+	 */
+	inst->std = (fh->out.pixelformat == V4L2_PIX_FMT_HEVC) ?
+	    W_HEVC_DEC : W_AVC_DEC;
 	inst->ops = &wave5_v4l2_inst_ops;
 	/*
 	 * NV12 is chroma-interleaved; YUV420 ("YU12") is fully planar. The
@@ -788,6 +811,22 @@ wave5_dec_one(struct wave5_fh *fh)
 		device_printf(fh->sc->bsddev,
 		    "video0: get_output_info: %d\n", ret);
 		return (-1);
+	}
+
+	/*
+	 * Attach the next input timestamp to the buffer just decoded. The
+	 * decoder consumes pictures in decode order, which is the order the
+	 * packets arrived, so the queue is the right source here -- it was
+	 * only reading it back in display order that was wrong.
+	 */
+	if (out.index_frame_decoded >= 0 &&
+	    out.index_frame_decoded < MAX_REG_FRAME) {
+		if (fh->ts_tail < fh->ts_head) {
+			fh->ts_by_fb[out.index_frame_decoded] =
+			    fh->ts_fifo[fh->ts_tail % nitems(fh->ts_fifo)];
+			fh->ts_tail++;
+		} else
+			microtime(&fh->ts_by_fb[out.index_frame_decoded]);
 	}
 
 	if (out.index_frame_display >= 0 &&
@@ -1166,14 +1205,8 @@ wave5_dqbuf(struct wave5_fh *fh, struct v4l2_buffer *v, int flags)
 
 	wave5_fill_vbuf(q, b, v, &plane);
 	v->bytesused = b->bytesused;
-	if (q == &fh->cap) {
-		if (fh->ts_tail < fh->ts_head) {
-			v->timestamp =
-			    fh->ts_fifo[fh->ts_tail % nitems(fh->ts_fifo)];
-			fh->ts_tail++;
-		} else
-			microtime(&v->timestamp);
-	}
+	if (q == &fh->cap && b->index < MAX_REG_FRAME)
+		v->timestamp = fh->ts_by_fb[b->index];
 	if (v->m.planes != NULL) {
 		err = copyout(&plane, v->m.planes, sizeof(plane));
 		if (err != 0)
@@ -1275,14 +1308,21 @@ wave5_v4l2_ioctl(struct cdev *dev, u_long cmd, caddr_t data, int fflag,
 	case VIDIOC_ENUM_FMT: {
 		struct v4l2_fmtdesc *f = (struct v4l2_fmtdesc *)data;
 
-		if (f->type == V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE && f->index != 0)
-			return (EINVAL);
 		if (f->type == V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE) {
-			f->pixelformat = V4L2_PIX_FMT_H264;
 			f->flags = V4L2_FMT_FLAG_COMPRESSED;
-			strlcpy((char *)f->description, "H.264",
-			    sizeof(f->description));
-			return (0);
+			switch (f->index) {
+			case 0:
+				f->pixelformat = V4L2_PIX_FMT_H264;
+				strlcpy((char *)f->description, "H.264",
+				    sizeof(f->description));
+				return (0);
+			case 1:
+				f->pixelformat = V4L2_PIX_FMT_HEVC;
+				strlcpy((char *)f->description, "HEVC",
+				    sizeof(f->description));
+				return (0);
+			}
+			return (EINVAL);
 		}
 		if (f->type == V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE) {
 			/*
