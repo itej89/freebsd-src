@@ -143,6 +143,7 @@ SUBDIR=	\
 	${_hptrr} \
 	hwpmc \
 	${_hwt} \
+	${_wave5} \
 	${_hyperv} \
 	i2c \
 	${_iavf} \
@@ -884,6 +885,11 @@ _p2sb=		p2sb
 
 .if ${MACHINE_CPUARCH} == "aarch64" || ${MACHINE_CPUARCH} == "amd64"
 _hwt=		hwt
+.endif
+
+.if ${MACHINE_CPUARCH} == "riscv"
+# StarFive JH7110 Wave511 video decoder
+_wave5=		wave5
 .endif
 
 .if ${MACHINE_CPUARCH} == "aarch64" || ${MACHINE_CPUARCH} == "amd64" || \

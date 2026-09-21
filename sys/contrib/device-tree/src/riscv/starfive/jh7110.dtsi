@@ -931,6 +931,43 @@
 				 <&syscrg JH7110_SYSRST_WDT_CORE>;
 		};
 
+		/*
+		 * Chips&Media Wave511 video decoder. Not present upstream in
+		 * FreeBSD's copy of this dtsi; taken from the StarFive Linux
+		 * tree, where it is described with status "disabled" and
+		 * enabled per board. It is enabled unconditionally here
+		 * because the only consumer is our own wave5 driver and every
+		 * JH7110 has the block.
+		 *
+		 * The rst_sram reset (AXIMEM0) is not the decoder's own: it
+		 * releases the AXI-attached SRAM the core stages working
+		 * buffers in. The vendor DT groups it here, so do we.
+		 *
+		 * Linux's node also carries "starfive,vdec_noc_ctrl", which no
+		 * driver in that tree reads; it is dropped rather than copied.
+		 */
+		vpu_dec: vpu_dec@130a0000 {
+			compatible = "starfive,vdec";
+			reg = <0x0 0x130a0000 0x0 0x10000>;
+			interrupts = <13>;
+			clocks = <&syscrg JH7110_SYSCLK_WAVE511_AXI>,
+				 <&syscrg JH7110_SYSCLK_WAVE511_BPU>,
+				 <&syscrg JH7110_SYSCLK_WAVE511_VCE>,
+				 <&syscrg JH7110_SYSCLK_WAVE511_APB>,
+				 <&syscrg JH7110_SYSCLK_NOC_BUS_VDEC_AXI>,
+				 <&syscrg JH7110_SYSCLK_VDEC_MAIN>;
+			clock-names = "axi_clk", "bpu_clk", "vce_clk",
+				      "apb_clk", "noc_bus", "main_clk";
+			resets = <&syscrg JH7110_SYSRST_WAVE511_AXI>,
+				 <&syscrg JH7110_SYSRST_WAVE511_BPU>,
+				 <&syscrg JH7110_SYSRST_WAVE511_VCE>,
+				 <&syscrg JH7110_SYSRST_WAVE511_APB>,
+				 <&syscrg JH7110_SYSRST_AXIMEM0_AXI>;
+			reset-names = "rst_axi", "rst_bpu", "rst_vce",
+				      "rst_apb", "rst_sram";
+			power-domains = <&pwrc JH7110_PD_VDEC>;
+		};
+
 		crypto: crypto@16000000 {
 			compatible = "starfive,jh7110-crypto";
 			reg = <0x0 0x16000000 0x0 0x4000>;
