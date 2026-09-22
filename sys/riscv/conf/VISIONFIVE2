@@ -1,0 +1,46 @@
+#
+# VISIONFIVE2 -- kernel configuration for the StarFive VisionFive 2 (JH7110).
+#
+# The product kernel. Until now this board was built as stock GENERIC, which
+# meant the kernel a release shipped was implied by whatever files.starfive
+# happened to contain rather than stated anywhere. This file is the statement.
+#
+# It deliberately starts from GENERIC rather than replacing it: GENERIC is
+# maintained upstream and tracks changes we would otherwise have to chase by
+# hand, and every driver this board needs already reaches it through
+# std.starfive. What belongs here is what is true of the *product* and not of
+# the architecture.
+
+include		GENERIC
+
+ident		VISIONFIVE2
+
+#
+# Not trimmed, on purpose.
+#
+# GENERIC also carries std.allwinner, std.cvitek, std.eswin and std.sifive,
+# and builds the full module set. A product kernel would reasonably drop the
+# other SoC vendors and use MODULES_OVERRIDE to build only what this board
+# loads -- a real saving in build time and image size.
+#
+# That is not done here because it cannot be done safely by inspection: the
+# board loads modules from three places (the kernel's own directory, the
+# packages in /boot/modules, and whatever a compositor pulls in), and a list
+# that looks complete until something is missed produces a board that boots
+# and then fails in a way that looks like a driver bug. It is tracked as its
+# own item so it gets the A/B it needs rather than being smuggled in here.
+#
+# The drivers this board actually depends on all arrive through
+# std.starfive -> files.starfive:
+#
+#   jh7110_axidma     DesignWare AXI DMAC; audio cannot be paced without it
+#   jh7110_pwmdac     3.5 mm jack, and its codec
+#   jh7110_i2s        I2S TX0, the HDMI audio CPU DAI
+#   jh7110_hdmi_audio HDMI audio codec
+#   jh7110_inno_hdmi  HDMI transmitter
+#   jh7110_gpio, _pmu, _rtc, _temp, _wdt, _pcie, starfive_syscon
+#   wave5             Wave511 video decoder (module: /dev/video0)
+#   sifive_ccache     needed for the L2 bypass alias the DMA paths rely on
+#
+# The GPU is not here: pvrsrvkm and the DRM modules are out-of-tree and come
+# from graphics/pvrsrvkm-kmod and graphics/drm-vf2-kmod.
