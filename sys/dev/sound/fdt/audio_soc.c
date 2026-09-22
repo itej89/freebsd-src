@@ -432,7 +432,16 @@ audio_soc_attach(device_t dev)
 	sc->dev = dev;
 	node = ofw_bus_get_node(dev);
 
-	ret = OF_getprop_alloc(node, "name", (void **)&name);
+	/*
+	 * Prefer the name the binding defines for this, and which boards
+	 * actually set to something meaningful; the node name ("sound",
+	 * "sound1") is what everything from /dev/sndstat to a desktop volume
+	 * applet would otherwise display. Fall back to the node name so
+	 * boards that omit the property are unaffected.
+	 */
+	ret = OF_getprop_alloc(node, "simple-audio-card,name", (void **)&name);
+	if (ret == -1)
+		ret = OF_getprop_alloc(node, "name", (void **)&name);
 	if (ret == -1)
 		name = "SoC audio";
 
