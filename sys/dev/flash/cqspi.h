@@ -58,6 +58,7 @@
 #define	 DEVRD_DUMMYRDCLKS_S	24
 #define	 DEVRD_ENMODEBITS	(1 << 20)
 #define	 DEVRD_DATA_WIDTH_S	16
+#define	 DEVRD_DATA_WIDTH_SINGLE	(0 << DEVRD_DATA_WIDTH_S)
 #define	 DEVRD_DATA_WIDTH_QUAD	(2 << DEVRD_DATA_WIDTH_S)
 #define	 DEVRD_ADDR_WIDTH_S	12
 #define	 DEVRD_ADDR_WIDTH_SINGLE	(0 << DEVRD_ADDR_WIDTH_S)
@@ -77,6 +78,7 @@
 #define	 DELAY_AFTER_S		8
 #define	 DELAY_INIT_S		0
 #define	CQSPI_RDDATACAP		0x10	/* Read Data Capture Register */
+#define	 RDDATACAP_BYPASS	(1 << 0)
 #define	 RDDATACAP_DELAY_S	1
 #define	 RDDATACAP_DELAY_M	(0xf << RDDATACAP_DELAY_S)
 #define	CQSPI_DEVSZ		0x14	/* Device Size Configuration Register */

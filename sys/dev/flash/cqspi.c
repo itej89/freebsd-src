@@ -400,7 +400,19 @@ cqspi_erase(device_t dev, device_t child, off_t offset)
 
 	cqspi_wait_idle(sc);
 	cqspi_wait_ready(sc);
-	cqspi_cmd_write_addr(sc, CMD_QUAD_SECTOR_ERASE, offset, 4);
+	/*
+	 * Three address bytes, matching the device size programmed in
+	 * cqspi_init() and the width the read path is now verified to work
+	 * with. This asked for four while the part is in three-byte mode,
+	 * which shifts the address by a byte -- on the chip that holds the
+	 * only copy of this board's bootloader.
+	 *
+	 * WARNING: the write and erase paths remain UNTESTED. Only the read
+	 * path has been exercised against hardware, and deliberately so: there
+	 * is no second copy of this bootloader to recover from. Do not exercise
+	 * these until they can be tried on a part that is not the boot device.
+	 */
+	cqspi_cmd_write_addr(sc, CMD_QUAD_SECTOR_ERASE, offset, 3);
 
 	cqspi_wait_idle(sc);
 
@@ -516,15 +528,31 @@ cqspi_read(device_t dev, device_t child, struct bio *bp,
 	WRITE4(sc, CQSPI_INDRDCNT, count);
 	WRITE4(sc, CQSPI_INDRDSTADDR, offset);
 
+	/*
+	 * Plain single-lane READ (0x03), no dummy cycles and no mode bits.
+	 *
+	 * This used to issue CMD_READ_4B_QUAD_OUTPUT (0x6C) with mode bits
+	 * enabled and zero dummy clocks, which cannot work: every fast-read
+	 * opcode needs dummy cycles between the address and the data, and
+	 * starting to sample immediately returns the tail of the address phase
+	 * instead of flash contents. That is what produced the handful of
+	 * repeating byte values (0xCC, 0xFF, 0xEE) seen on every read.
+	 *
+	 * The values here are not a guess. Linux on this same board was
+	 * sampled while it read 4 MB out of the same chip, and it programs
+	 * DEVRD = 0x00000003 throughout: opcode 0x03, instruction, address and
+	 * data all single-lane, zero dummy clocks, mode bits off. Quad mode is
+	 * not used there either -- nothing negotiates it -- so it is not used
+	 * here.
+	 */
 	reg = (0 << DEVRD_DUMMYRDCLKS_S);
-	reg |= DEVRD_DATA_WIDTH_QUAD;
+	reg |= DEVRD_DATA_WIDTH_SINGLE;
 	reg |= DEVRD_ADDR_WIDTH_SINGLE;
 	reg |= DEVRD_INST_WIDTH_SINGLE;
-	reg |= DEVRD_ENMODEBITS;
-	reg |= (CMD_READ_4B_QUAD_OUTPUT << DEVRD_RDOPCODE_S);
+	reg |= (CMD_READ << DEVRD_RDOPCODE_S);
 	WRITE4(sc, CQSPI_DEVRD, reg);
 
-	WRITE4(sc, CQSPI_MODEBIT, 0xff);
+	WRITE4(sc, CQSPI_MODEBIT, 0);
 	WRITE4(sc, CQSPI_IRQMASK, 0);
 
 	if (sc->xdma_rx != NULL) {
@@ -629,9 +657,21 @@ cqspi_init(struct cqspi_softc *sc)
 	reg &= ~(CFG_EN);
 	WRITE4(sc, CQSPI_CFG, reg);
 
+	/*
+	 * Three address bytes, which is what the 16 MB part on this board
+	 * takes and what Linux programs here (DEVSZ reads 0x02, and the field
+	 * holds the count minus one).
+	 *
+	 * This asked for four, and did so through a subtraction where a shift
+	 * was meant -- "(4 - 1) - DEVSZ_NUMADDRBYTES_S". It came out as 3 only
+	 * because that shift is zero, so the expression was wrong in form and
+	 * wrong in value at the same time. A fourth address byte sent to a
+	 * command that expects three shifts the whole address and reads the
+	 * wrong place.
+	 */
 	reg = READ4(sc, CQSPI_DEVSZ);
 	reg &= ~(DEVSZ_NUMADDRBYTES_M);
-	reg |= ((4 - 1) - DEVSZ_NUMADDRBYTES_S);
+	reg |= ((3 - 1) << DEVSZ_NUMADDRBYTES_S);
 	WRITE4(sc, CQSPI_DEVSZ, reg);
 
 	WRITE4(sc, CQSPI_SRAMPART, sc->fifo_depth/2);
@@ -651,9 +691,22 @@ cqspi_init(struct cqspi_softc *sc)
 	reg |= (1 << DELAY_INIT_S);
 	WRITE4(sc, CQSPI_DELAY, reg);
 
-	READ4(sc, CQSPI_RDDATACAP);
+	/*
+	 * Read data capture: sample the incoming data five controller clocks
+	 * late, with the bypass bit set. Linux programs RDDATACAP = 0x0b on
+	 * this board.
+	 *
+	 * The READ4() here discarded its result, so every line below operated
+	 * on whatever "reg" still held from the CQSPI_CFG write above and this
+	 * register was programmed from another register's bits. Sampling delay
+	 * is what decides whether data is latched in the right clock, so
+	 * getting it by accident is how a read returns plausible-looking
+	 * rubbish rather than failing outright.
+	 */
+	reg = READ4(sc, CQSPI_RDDATACAP);
 	reg &= ~(RDDATACAP_DELAY_M);
-	reg |= (1 << RDDATACAP_DELAY_S);
+	reg |= (5 << RDDATACAP_DELAY_S);
+	reg |= RDDATACAP_BYPASS;
 	WRITE4(sc, CQSPI_RDDATACAP, reg);
 
 	/* Enable controller */
